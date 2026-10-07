@@ -1,0 +1,95 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R 9 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 1269 >>
+stream
+BT
+/F1 9 Tf 1 0 0 1 72 750 Tm (Example Agency Audit Division) Tj
+/F2 22 Tf 1 0 0 1 72 700 Tm (Audit of Example Program Controls) Tj
+/F2 14 Tf 1 0 0 1 72 660 Tm (Summary of Findings) Tj
+/F1 11 Tf 1 0 0 1 72 636 Tm (The audit examined whether the Agency maintained adequate controls over its) Tj
+/F1 11 Tf 1 0 0 1 72 622 Tm (program funds during the period under review. We found that several controls) Tj
+/F1 11 Tf 1 0 0 1 72 608 Tm (were not applied consistently, and that the respon-) Tj
+/F1 11 Tf 1 0 0 1 72 594 Tm (sibility for approvals was not clearly assigned to any single office.) Tj
+/F1 11 Tf 1 0 0 1 72 570 Tm (Auditors recommend that the Agency take the following steps:) Tj
+/F1 11 Tf 1 0 0 1 90 550 Tm (1. Assign a single office to approve all program payments.) Tj
+/F1 11 Tf 1 0 0 1 90 534 Tm (2. Reconcile the payment ledger monthly and keep the records.) Tj
+/F1 11 Tf 1 0 0 1 90 518 Tm (3. Train staff on the revised approval procedure.) Tj
+/F1 11 Tf 1 0 0 1 72 494 Tm (Other observations:) Tj
+/F1 11 Tf 1 0 0 1 90 476 Tm (• Several files lacked a signed approval form.) Tj
+/F1 11 Tf 1 0 0 1 90 460 Tm (• Receipts were stored in more than one location.) Tj
+/F1 9 Tf 1 0 0 1 260 40 Tm (Page 1 of 3) Tj
+/F1 9 Tf 1 0 0 1 72 40 Tm (Confidential Draft) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 861 >>
+stream
+BT
+/F1 9 Tf 1 0 0 1 72 750 Tm (Example Agency Audit Division) Tj
+/F2 14 Tf 1 0 0 1 72 700 Tm (Corrective Action Plan) Tj
+/F1 11 Tf 1 0 0 1 72 676 Tm (Corrective Action #1: The Agency will designate a payment approval office) Tj
+/F1 11 Tf 1 0 0 1 72 662 Tm (by the end of the next quarter and publish its name internally.) Tj
+/F1 11 Tf 1 0 0 1 72 638 Tm (Corrective Action #2: The Agency will reconcile the payment ledger every) Tj
+/F1 11 Tf 1 0 0 1 72 624 Tm (month and retain the reconciliation for seven years.) Tj
+/F2 14 Tf 1 0 0 1 72 594 Tm (Response Schedule) Tj
+/F1 11 Tf 1 0 0 1 72 572 Tm (Item        Owner        Due) Tj
+/F1 11 Tf 1 0 0 1 72 558 Tm (Approval     Finance      March 1) Tj
+/F1 11 Tf 1 0 0 1 72 544 Tm (Ledger       Accounting   April 1) Tj
+/F1 9 Tf 1 0 0 1 260 40 Tm (Page 2 of 3) Tj
+/F1 9 Tf 1 0 0 1 72 40 Tm (Confidential Draft) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 10 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>
+endobj
+10 0 obj
+<< /Length 378 >>
+stream
+BT
+/F1 9 Tf 1 0 0 1 72 750 Tm (Example Agency Audit Division) Tj
+/F2 14 Tf 1 0 0 1 72 700 Tm (Conclusion) Tj
+/F1 11 Tf 1 0 0 1 72 676 Tm (The Agency has agreed to implement the actions above. We will follow up) Tj
+/F1 11 Tf 1 0 0 1 72 662 Tm (on their status in twelve months.) Tj
+/F1 9 Tf 1 0 0 1 260 40 Tm (Page 3 of 3) Tj
+/F1 9 Tf 1 0 0 1 72 40 Tm (Confidential Draft) Tj
+ET
+endstream
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000000462 00000 n 
+0000001782 00000 n 
+0000001918 00000 n 
+0000002829 00000 n 
+0000002966 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R >>
+startxref
+3395
+%%EOF

@@ -1,0 +1,5 @@
+# Pinned third-party binaries (not committed; fetched by scripts/fetch-pdfium.sh)
+[pdfium.macos-arm64]
+release = "chromium/8086"
+url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8086/pdfium-mac-arm64.tgz"
+sha256 = "e98679e052c07edbb5a627980902abb823d4b3f35744d877bd21668bd9fc13ab"
