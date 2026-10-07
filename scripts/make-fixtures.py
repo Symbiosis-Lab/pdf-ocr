@@ -21,10 +21,10 @@ def page(n, total):
         t("F2", 22, 72, 700, "Audit of Example Program Controls")
         t("F2", 14, 72, 660, "Summary of Findings")
         body = [
-            "The audit examined whether the Agency maintained adequate controls over its",
-            "program funds during the period under review. We found that several controls",
-            "were not applied consistently, and that the respon-",
-            "sibility for approvals was not clearly assigned to any single office.",
+            "The audit examined whether the Agency maintained adequate controls over its program",
+            "funds during the period under review. We found that several controls were not applied",
+            "consistently, and that the respon-",
+            "sibility for approvals was not clearly assigned to any single office in the Agency.",
         ]
         y = 636
         for l in body:
