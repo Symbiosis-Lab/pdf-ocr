@@ -182,7 +182,7 @@ pub fn page_lines(page: &PdfPage) -> Page {
             text.push_str(&s.text);
             px1 = Some(s.x1);
         }
-        let mut text = text.trim().to_string();
+        let mut text = fix_ordinals(text.trim());
         // letter-spaced display type: "P O L I C Y"
         let toks: Vec<&str> = text.split(' ').collect();
         if toks.len() >= 4 && toks.iter().all(|t| t.chars().count() == 1 && t.chars().all(|c| c.is_alphabetic())) {
@@ -194,4 +194,35 @@ pub fn page_lines(page: &PdfPage) -> Page {
         lines.push(Line { x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text, tabular });
     }
     Page { height, lines }
+}
+
+/// A raised "th" often comes out as "t h" next to its number: "285t h" -> "285th".
+fn fix_ordinals(s: &str) -> String {
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < cs.len() {
+        out.push(cs[i]);
+        if cs[i].is_ascii_digit() && i + 3 < cs.len() + 0 && cs[i + 2] == ' ' {
+            let pair = (cs[i + 1], cs[i + 3]);
+            let after = cs.get(i + 4).copied();
+            if matches!(pair, ('t', 'h') | ('s', 't') | ('n', 'd') | ('r', 'd')) && after.map_or(true, |c| !c.is_alphanumeric()) {
+                out.push(pair.0);
+                out.push(pair.1);
+                i += 4;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ordinals() {
+        assert_eq!(super::fix_ordinals("285t h Meeting, March 5t h, 2026"), "285th Meeting, March 5th, 2026");
+        assert_eq!(super::fix_ordinals("1 s test"), "1 s test");
+    }
 }

@@ -362,12 +362,47 @@ fn right_margin(lines: &[Line]) -> f32 {
     xs[(xs.len() * 85 / 100).min(xs.len() - 1)]
 }
 
-fn blocks_for_page(p: &Page) -> Vec<Blk> {
+fn sorted_lines(p: &Page) -> Vec<&Line> {
     let mut lines: Vec<&Line> = p.lines.iter().collect();
     lines.sort_by(|a, b| {
         let tol = 0.35 * a.size.max(b.size);
         if (a.base - b.base).abs() <= tol { a.x0.partial_cmp(&b.x0).unwrap() } else { b.base.partial_cmp(&a.base).unwrap() }
     });
+    lines
+}
+
+/// Gap (in font sizes) that separates paragraphs. Double-spaced documents have
+/// a normal line gap of ~2, so the threshold is learned from wrapped lines:
+/// a full-width line followed by a same-style line must be a continuation.
+fn paragraph_gap(pages: &[&Page]) -> f32 {
+    let mut samples: Vec<f32> = Vec::new();
+    for p in pages {
+        let right = right_margin(&p.lines);
+        for w in sorted_lines(p).windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let gap = (a.base - b.base) / b.size.max(a.size);
+            if (a.size - b.size).abs() <= 0.6
+                && a.bold == b.bold
+                && !a.tabular
+                && !b.tabular
+                && a.x1 >= right - 3.0 * a.size
+                && gap > 0.5
+                && gap < 3.2
+                && (a.x0 - b.x0).abs() < 1.5 * a.size
+            {
+                samples.push(gap);
+            }
+        }
+    }
+    if samples.len() < 5 {
+        return 1.6;
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (1.3 * samples[samples.len() / 2]).max(1.55)
+}
+
+fn blocks_for_page(p: &Page, para_gap: f32) -> Vec<Blk> {
+    let lines = sorted_lines(p);
     let right = right_margin(&p.lines);
     let mut out: Vec<Blk> = Vec::new();
     let mut prev: Option<&Line> = None;
@@ -382,7 +417,7 @@ fn blocks_for_page(p: &Page) -> Vec<Blk> {
             let hyph = pl.text.ends_with('-');
             let short = !hyph && pl.x1 < right - 10.0 * pl.size;
             let indent = !is_item && l.x0 - pl.x0 > 0.8 * l.size && !pl.tabular && !l.tabular;
-            brk = !style || gap > 1.6 * l.size.max(pl.size) || marker.is_some() || indent || gap <= 0.0;
+            brk = !style || gap > para_gap * l.size.max(pl.size) || marker.is_some() || indent || gap <= 0.0;
             hard = pl.tabular || l.tabular || short;
         }
         let text_after = |m: Option<(Item, usize)>| match m {
@@ -449,6 +484,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
     }
     let all: Vec<&Page> = contents.iter().filter_map(|c| if let Content::Lines(p) = c { Some(p) } else { None }).collect();
     let body = mode_size(&all);
+    let para_gap = paragraph_gap(&all);
 
     // 2. blocks per page, headings classified
     let mut page_blocks: Vec<Vec<Blk>> = Vec::new();
@@ -456,7 +492,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
     for c in &contents {
         match c {
             Content::Lines(p) => {
-                let mut bl = blocks_for_page(p);
+                let mut bl = blocks_for_page(p, para_gap);
                 for b in bl.iter_mut() {
                     if classify_heading(b, body) {
                         b.kind = Kind::Heading;
@@ -626,5 +662,15 @@ mod tests {
         assert_eq!(escape_line_start(&escape_inline("# not heading")), "\\# not heading");
         assert_eq!(escape_inline("see [[x]] and *this*"), "see \\[\\[x]] and \\*this\\*");
         assert_eq!(escape_line_start("2019. Year"), "2019\\. Year");
+    }
+
+    #[test]
+    fn double_spaced_text_stays_one_paragraph() {
+        let mk = |i: usize, w: &str| Line { x0: 72.0, x1: 540.0, base: 700.0 - 24.0 * i as f32, size: 12.0, bold: false, text: w.to_string(), tabular: false };
+        let mut lines: Vec<Line> = (0..6).map(|i| mk(i, "word word word word word word word word word word word word")).collect();
+        lines.push(Line { x1: 300.0, ..mk(6, "last line of paragraph one.") });
+        lines.extend((8..12).map(|i| mk(i, "second paragraph words words words words words words words")));
+        let r = render(vec![Content::Lines(Page { height: 792.0, lines })], None);
+        assert_eq!(r.markdown.split("\n\n").count(), 2, "{}", r.markdown);
     }
 }
