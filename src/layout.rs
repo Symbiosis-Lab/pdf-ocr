@@ -257,6 +257,37 @@ pub fn join_wrapped(a: &mut String, b: &str, vocab: &Vocab) {
     a.push_str(b);
 }
 
+/// OCR has no geometry, so the running header/footer is whatever first or last
+/// line repeats (digits normalised) on at least half of the scanned pages.
+fn strip_ocr_running(pages: &mut [&mut String]) {
+    let edge = |t: &str, first: bool| -> Option<usize> {
+        let mut idx = t.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()).map(|(i, _)| i);
+        if first { idx.next() } else { idx.last() }
+    };
+    let n = pages.len();
+    let need = 2.max(n.div_ceil(2));
+    let mut counts: HashMap<(String, bool), usize> = HashMap::new();
+    for p in pages.iter() {
+        for first in [true, false] {
+            if let Some(i) = edge(p, first) {
+                *counts.entry((norm_key(p.lines().nth(i).unwrap()), first)).or_default() += 1;
+            }
+        }
+    }
+    for p in pages.iter_mut() {
+        for first in [true, false] {
+            if let Some(i) = edge(p, first) {
+                let line = p.lines().nth(i).unwrap().to_string();
+                let repeated = n >= 2 && counts.get(&(norm_key(&line), first)).copied().unwrap_or(0) >= need;
+                if repeated || is_page_number(&line) {
+                    let kept: Vec<&str> = p.lines().enumerate().filter(|(j, _)| *j != i).map(|(_, l)| l).collect();
+                    **p = kept.join("\n");
+                }
+            }
+        }
+    }
+}
+
 pub fn ocr_to_markdown(text: &str, vocab: &Vocab) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for para in text.split("\n\n") {
@@ -514,6 +545,10 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
             .filter_map(|c| if let Content::Lines(p) = c { Some(p) } else { None })
             .collect();
         strip_running(&mut refs);
+    }
+    {
+        let mut refs: Vec<&mut String> = contents.iter_mut().filter_map(|c| if let Content::Ocr(t) = c { Some(t) } else { None }).collect();
+        strip_ocr_running(&mut refs);
     }
     let mut vocab = Vocab::new();
     for c in &contents {
