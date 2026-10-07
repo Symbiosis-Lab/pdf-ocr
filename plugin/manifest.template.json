@@ -1,0 +1,16 @@
+{
+  "name": "moss-docs",
+  "version": "0.1.0",
+  "description": "Shows a folder's PDFs as pages: extracts each document's text, reading scanned pages by OCR.",
+  "contributes": {
+    "derivations": {
+      "pdf-pages": {
+        "accepts": ["pdf"],
+        "noun": { "one": "PDF", "other": "PDFs" },
+        "fragments": { "text": "markdown" },
+        "stub": ["#text", ""],
+        "run": { "binary": "moss-docs", "artifact": [ ARTIFACT ] }
+      }
+    }
+  }
+}
