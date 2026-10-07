@@ -24,14 +24,15 @@ struct Seg {
 }
 
 fn is_bold(c: &PdfPageTextChar) -> bool {
-    match c.font_weight() {
+    // pdfium's weight is unreliable for embedded subsets, so look at the name too.
+    let by_weight = match c.font_weight() {
         Some(PdfFontWeight::Weight600) | Some(PdfFontWeight::Weight700Bold) | Some(PdfFontWeight::Weight800) | Some(PdfFontWeight::Weight900) => true,
         Some(PdfFontWeight::Custom(w)) => w >= 600,
-        Some(_) => false,
-        None => {
-            let n = c.font_name().to_lowercase();
-            n.contains("bold") || n.contains("black") || n.contains("heavy") || n.contains("semibold") || n.contains("demi")
-        }
+        _ => false,
+    };
+    by_weight || {
+        let n = c.font_name().to_lowercase();
+        n.contains("bold") || n.contains("black") || n.contains("heavy") || n.contains("demi") || n.ends_with("-bd") || n.contains("-bd")
     }
 }
 
@@ -88,7 +89,7 @@ fn finish_seg(chars: &[Ch]) -> Option<Seg> {
             continue;
         }
         if let Some(px) = prev_x1 {
-            if pending || c.x0 - px > 0.22 * c.size {
+            if pending || c.x0 - px > 0.15 * c.size {
                 if !text.is_empty() {
                     text.push(' ');
                 }
@@ -181,7 +182,12 @@ pub fn page_lines(page: &PdfPage) -> Page {
             text.push_str(&s.text);
             px1 = Some(s.x1);
         }
-        let text = text.trim().to_string();
+        let mut text = text.trim().to_string();
+        // letter-spaced display type: "P O L I C Y"
+        let toks: Vec<&str> = text.split(' ').collect();
+        if toks.len() >= 4 && toks.iter().all(|t| t.chars().count() == 1 && t.chars().all(|c| c.is_alphabetic())) {
+            text = toks.concat();
+        }
         if text.is_empty() {
             continue;
         }

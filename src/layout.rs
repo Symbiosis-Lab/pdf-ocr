@@ -255,8 +255,8 @@ pub fn ocr_to_markdown(text: &str) -> String {
 fn render_oneline(s: &str) -> String {
     let (prefix, rest) = match list_marker(s) {
         Some((Item::Bullet, n)) => ("- ".to_string(), &s[n..]),
-        Some((_, _)) => (String::new(), s),
-        None => (String::new(), s),
+        Some((Item::Numbered, _)) => return escape_inline(s),
+        _ => (String::new(), s),
     };
     format!("{prefix}{}", escape_line_start(&escape_inline(rest)))
 }
