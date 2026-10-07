@@ -135,6 +135,12 @@ fn list_marker(s: &str) -> Option<(Item, usize)> {
         }
         return None;
     }
+    if c0.is_ascii_uppercase() {
+        let n = s.chars().take_while(|c| "IVXLC".contains(*c)).count();
+        if (1..=5).contains(&n) && s[n..].starts_with(". ") && s[n + 2..].chars().next().is_some_and(|c| c.is_uppercase()) {
+            return after(n + 1).map(|m| (Item::Other, m));
+        }
+    }
     if c0.is_ascii_alphabetic() {
         let rest = &s[1..];
         if (rest.starts_with('.') && c0.is_ascii_lowercase()) || rest.starts_with(')') {
@@ -209,14 +215,37 @@ fn escape_line_start(s: &str) -> String {
     }
 }
 
-/// Join two wrapped lines: de-hyphenate a break inside a word.
-pub fn join_wrapped(a: &mut String, b: &str) {
+pub type Vocab = HashSet<String>;
+
+fn words_of(s: &str) -> impl Iterator<Item = String> + '_ {
+    s.split(|c: char| !c.is_alphabetic()).filter(|w| w.chars().count() >= 2).map(|w| w.to_lowercase())
+}
+
+fn add_vocab(v: &mut Vocab, text: &str) {
+    for l in text.lines() {
+        // words cut by a line-end hyphen are not evidence of how they are spelled
+        let l = l.trim_end();
+        let l = l.strip_suffix('-').map(|x| x.trim_end_matches(|c: char| c.is_alphabetic())).unwrap_or(l);
+        v.extend(words_of(l));
+    }
+}
+
+/// Join two wrapped lines. A hyphen at the break is dropped only when the
+/// joined word is attested elsewhere in the document, or when the halves are
+/// not words on their own ("respon-sibility"); "federal-level" keeps its hyphen.
+pub fn join_wrapped(a: &mut String, b: &str, vocab: &Vocab) {
     if let Some(stem) = a.strip_suffix('-') {
         let prev_alpha = stem.chars().last().is_some_and(|c| c.is_alphabetic());
         let next = b.chars().next();
         if prev_alpha && next.is_some_and(|c| c.is_alphabetic()) {
             if next.is_some_and(|c| c.is_lowercase()) {
-                a.pop(); // "respon-" + "sibility"
+                let left: String = stem.chars().rev().take_while(|c| c.is_alphabetic()).collect::<Vec<_>>().into_iter().rev().collect::<String>().to_lowercase();
+                let right: String = b.chars().take_while(|c| c.is_alphabetic()).collect::<String>().to_lowercase();
+                let joined = format!("{left}{right}");
+                let halves_are_words = left.chars().count() >= 3 && right.chars().count() >= 3 && vocab.contains(&left) && vocab.contains(&right);
+                if vocab.contains(&joined) || !halves_are_words {
+                    a.pop();
+                }
             }
             a.push_str(b);
             return;
@@ -228,7 +257,7 @@ pub fn join_wrapped(a: &mut String, b: &str) {
     a.push_str(b);
 }
 
-pub fn ocr_to_markdown(text: &str) -> String {
+pub fn ocr_to_markdown(text: &str, vocab: &Vocab) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for para in text.split("\n\n") {
         let mut cur: Vec<String> = Vec::new();
@@ -242,7 +271,7 @@ pub fn ocr_to_markdown(text: &str) -> String {
                 cur.push(l.to_string());
             } else {
                 let last = cur.last_mut().unwrap();
-                join_wrapped(last, l);
+                join_wrapped(last, l, vocab);
             }
         }
         for item in cur {
@@ -266,6 +295,10 @@ fn render_oneline(s: &str) -> String {
 fn is_generic_title(t: &str) -> bool {
     let l = t.to_lowercase();
     let words = l.split_whitespace().count();
+    let org_tail = l.split_whitespace().last().is_some_and(|w| ["commission", "department", "office", "agency", "board", "city", "council"].contains(&w));
+    if words <= 9 && org_tail && !l.chars().any(|c| c.is_ascii_digit()) {
+        return true;
+    }
     if words >= 7 {
         return false;
     }
@@ -401,7 +434,7 @@ fn paragraph_gap(pages: &[&Page]) -> f32 {
     (1.3 * samples[samples.len() / 2]).max(1.55)
 }
 
-fn blocks_for_page(p: &Page, para_gap: f32) -> Vec<Blk> {
+fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
     let lines = sorted_lines(p);
     let right = right_margin(&p.lines);
     let mut out: Vec<Blk> = Vec::new();
@@ -436,7 +469,7 @@ fn blocks_for_page(p: &Page, para_gap: f32) -> Vec<Blk> {
                 b.logical.push(l.text.clone());
             } else {
                 let last = b.logical.last_mut().unwrap();
-                join_wrapped(last, &l.text);
+                join_wrapped(last, &l.text, vocab);
             }
         }
         prev = Some(l);
@@ -455,7 +488,7 @@ fn classify_heading(b: &mut Blk, body: f32) -> bool {
     let text = b.logical.join(" ");
     let chars = text.chars().count();
     let words = text.split_whitespace().count();
-    if b.logical.len() > 3 || chars == 0 || chars > 120 || words > 16 {
+    if text.contains('…') || b.logical.len() > 3 || chars == 0 || chars > 120 || words > 16 {
         return false;
     }
     if text.ends_with('.') && words > 8 {
@@ -482,17 +515,24 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
             .collect();
         strip_running(&mut refs);
     }
+    let mut vocab = Vocab::new();
+    for c in &contents {
+        match c {
+            Content::Lines(p) => p.lines.iter().for_each(|l| add_vocab(&mut vocab, &l.text)),
+            Content::Ocr(t) => add_vocab(&mut vocab, t),
+        }
+    }
     let all: Vec<&Page> = contents.iter().filter_map(|c| if let Content::Lines(p) = c { Some(p) } else { None }).collect();
     let body = mode_size(&all);
     let para_gap = paragraph_gap(&all);
 
     // 2. blocks per page, headings classified
     let mut page_blocks: Vec<Vec<Blk>> = Vec::new();
-    let mut ocr_flag: Vec<Option<&String>> = Vec::new();
+    let mut ocr_flag: Vec<Option<String>> = Vec::new();
     for c in &contents {
         match c {
             Content::Lines(p) => {
-                let mut bl = blocks_for_page(p, para_gap);
+                let mut bl = blocks_for_page(p, para_gap, &vocab);
                 for b in bl.iter_mut() {
                     if classify_heading(b, body) {
                         b.kind = Kind::Heading;
@@ -503,7 +543,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
             }
             Content::Ocr(t) => {
                 page_blocks.push(Vec::new());
-                ocr_flag.push(Some(t));
+                ocr_flag.push(Some(ocr_to_markdown(t, &vocab)));
             }
         }
     }
@@ -512,18 +552,16 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
     let mut title: Option<String> = None;
     let mut drop_title: Option<(usize, usize)> = None;
     if let Some((pi, bl)) = page_blocks.iter().enumerate().find(|(i, b)| ocr_flag[*i].is_none() && !b.is_empty()) {
-        let best = bl
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| b.kind == Kind::Heading && b.size >= 1.2 * body)
-            .max_by(|(ia, a), (ib, b)| a.size.partial_cmp(&b.size).unwrap().then(ib.cmp(ia)));
-        if let Some((bi, b)) = best {
+        let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.kind == Kind::Heading && b.size >= 1.2 * body).collect();
+        cands.sort_by(|(ia, a), (ib, b)| b.size.partial_cmp(&a.size).unwrap().then(ia.cmp(ib)));
+        for (bi, b) in cands {
             let t = b.logical.join(" ");
             if t.chars().count() <= 120 && !is_generic_title(&t) {
                 title = Some(t);
                 if bi == 0 {
                     drop_title = Some((pi, bi));
                 }
+                break;
             }
         }
     }
@@ -548,7 +586,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
     };
     let mut prev_item = false;
     for (pi, bl) in page_blocks.iter().enumerate() {
-        if let Some(t) = ocr_flag[pi] {
+        if let Some(t) = ocr_flag[pi].as_ref() {
             flush(&mut carry, &mut parts);
             if !t.is_empty() {
                 parts.push((t.clone(), false));
@@ -567,7 +605,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
                 if bi == 0 && b.kind == Kind::Para && starts_lower && c.ends_open {
                     let first = b.logical.remove(0);
                     let last = c.logical.last_mut().unwrap();
-                    join_wrapped(last, &first);
+                    join_wrapped(last, &first, &vocab);
                     c.logical.extend(b.logical.drain(..));
                     c.ends_open = b.ends_open;
                     b = c;
@@ -641,11 +679,15 @@ mod tests {
     #[test]
     fn dehyphenate() {
         let mut a = "the respon-".to_string();
-        join_wrapped(&mut a, "sibility for");
+        join_wrapped(&mut a, "sibility for", &Vocab::new());
         assert_eq!(a, "the responsibility for");
         let mut a = "Non-".to_string();
-        join_wrapped(&mut a, "Profit");
+        join_wrapped(&mut a, "Profit", &Vocab::new());
         assert_eq!(a, "Non-Profit");
+        let v: Vocab = ["federal", "level", "federallevel"].iter().take(2).map(|s| s.to_string()).collect();
+        let mut a = "the federal-".to_string();
+        join_wrapped(&mut a, "level rules", &v);
+        assert_eq!(a, "the federal-level rules");
     }
 
     #[test]

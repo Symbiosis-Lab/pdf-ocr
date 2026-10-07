@@ -96,10 +96,9 @@ fn main() {
         let Some(t) = t.as_ref() else { fail("tesseract not found") };
         match ocr::ocr_page(&page, t, tmp.path()) {
             Ok(raw) => {
-                let md = layout::ocr_to_markdown(&raw);
-                let m: usize = md.chars().filter(|c| !c.is_whitespace()).count();
+                let m: usize = raw.chars().filter(|c| !c.is_whitespace()).count();
                 if m >= MIN_TEXT_CHARS || n == 0 {
-                    contents.push(Content::Ocr(if m >= MIN_TEXT_CHARS || m > 0 { md } else { String::new() }));
+                    contents.push(Content::Ocr(raw));
                 } else {
                     contents.push(Content::Lines(lp));
                 }

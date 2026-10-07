@@ -182,7 +182,7 @@ pub fn page_lines(page: &PdfPage) -> Page {
             text.push_str(&s.text);
             px1 = Some(s.x1);
         }
-        let mut text = fix_ordinals(text.trim());
+        let mut text = collapse_leaders(&fix_ordinals(text.trim()));
         // letter-spaced display type: "P O L I C Y"
         let toks: Vec<&str> = text.split(' ').collect();
         if toks.len() >= 4 && toks.iter().all(|t| t.chars().count() == 1 && t.chars().all(|c| c.is_alphabetic())) {
@@ -194,6 +194,38 @@ pub fn page_lines(page: &PdfPage) -> Page {
         lines.push(Line { x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text, tabular });
     }
     Page { height, lines }
+}
+
+/// Dot leaders in a table of contents ("Chapter ......... 5") become an ellipsis.
+fn collapse_leaders(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut run = 0usize;
+    let mut pending = String::new();
+    for c in s.chars() {
+        if c == '.' || (c == ' ' && run > 0) {
+            if c == '.' {
+                run += 1;
+            }
+            pending.push(c);
+            continue;
+        }
+        if run >= 4 {
+            out.truncate(out.trim_end().len());
+            out.push_str(" … ");
+        } else {
+            out.push_str(&pending);
+        }
+        pending.clear();
+        run = 0;
+        out.push(c);
+    }
+    if run >= 4 {
+        out.truncate(out.trim_end().len());
+        out.push_str(" …");
+    } else {
+        out.push_str(&pending);
+    }
+    out
 }
 
 /// A raised "th" often comes out as "t h" next to its number: "285t h" -> "285th".
@@ -224,5 +256,7 @@ mod tests {
     fn ordinals() {
         assert_eq!(super::fix_ordinals("285t h Meeting, March 5t h, 2026"), "285th Meeting, March 5th, 2026");
         assert_eq!(super::fix_ordinals("1 s test"), "1 s test");
+        assert_eq!(super::collapse_leaders("About the Commission ......... 5"), "About the Commission … 5");
+        assert_eq!(super::collapse_leaders("Etc. and so..."), "Etc. and so...");
     }
 }
