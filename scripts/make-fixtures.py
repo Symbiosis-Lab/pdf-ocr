@@ -67,7 +67,8 @@ def page(n, total):
     stream += "ET\n"
     return stream
 
-def build_text_pdf(path, total=3):
+def build_text_pdf(path, total=3, pagefn=None):
+    pagefn = pagefn or page
     objs = []
     objs.append("<< /Type /Catalog /Pages 2 0 R >>")
     kids = " ".join(f"{5+2*i} 0 R" for i in range(total))
@@ -78,7 +79,7 @@ def build_text_pdf(path, total=3):
         pid = 5 + 2 * i
         objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {pid+1} 0 R "
                     f"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>")
-        s = page(i + 1, total)
+        s = pagefn(i + 1, total)
         objs.append(f"<< /Length {len(s.encode('latin-1'))} >>\nstream\n{s}endstream")
     out = bytearray(b"%PDF-1.4\n")
     offs = []
@@ -91,6 +92,25 @@ def build_text_pdf(path, total=3):
         out += f"{o:010d} 00000 n \n".encode()
     out += f"trailer\n<< /Size {len(objs)+1} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n".encode()
     open(path, "wb").write(out)
+
+def sidebar_page(n, total):
+    ops = []
+    side = ["Jane Roe", "Chair", "John Doe", "Mary Major", "Commissioners", "Pat Smith", "Executive Director"]
+    y = 700
+    for l in side:
+        ops.append(("F1", 9, 54, y, l)); y -= 22
+    body = [("F1", 11, 200, 700, "March 3, 2021"),
+            ("F1", 11, 200, 672, "Dear Chair Example:"),
+            ("F1", 11, 200, 644, "We write to confirm that the review of the program is complete and that the"),
+            ("F1", 11, 200, 630, "results are attached to this letter for your records and for your board."),
+            ("F2", 11, 200, 602, "Purpose"),
+            ("F1", 11, 200, 588, "The purpose of this review was to evaluate whether the program followed its own"),
+            ("F1", 11, 200, 574, "published procedures during the period under review, and to report what we found.")]
+    ops += body
+    st = "BT\n"
+    for font, size, x, y, t in ops:
+        st += f"/{font} {size} Tf 1 0 0 1 {x} {y} Tm ({esc(t)}) Tj\n"
+    return st + "ET\n"
 
 def build_scan(path):
     from PIL import Image, ImageDraw, ImageFont
@@ -115,6 +135,7 @@ def build_encrypted(src, path):
 
 if __name__ == "__main__":
     build_text_pdf(os.path.join(OUT, "text3.pdf"))
+    build_text_pdf(os.path.join(OUT, "sidebar.pdf"), 1, sidebar_page)
     build_scan(os.path.join(OUT, "scan1.pdf"))
     build_encrypted(os.path.join(OUT, "text3.pdf"), os.path.join(OUT, "encrypted.pdf"))
     open(os.path.join(OUT, "notpdf.pdf"), "w").write("This is just a text file, not a PDF.\n")

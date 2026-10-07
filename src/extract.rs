@@ -120,37 +120,7 @@ fn finish_seg(chars: &[Ch]) -> Option<Seg> {
     Some(Seg { x0, x1, base, size, bold: bold_n * 2 > n, text, n })
 }
 
-pub fn page_lines(page: &PdfPage) -> Page {
-    let height = page.height().value;
-    let chars = page_chars(page);
-    // runs: consecutive chars on one baseline moving rightwards
-    let mut segs: Vec<Seg> = Vec::new();
-    let mut run: Vec<Ch> = Vec::new();
-    let mut run_base = 0.0f32;
-    for c in chars {
-        let split = match run.iter().rev().find(|p| !p.space) {
-            Some(p) => {
-                !c.space && ((c.base - run_base).abs() > 0.35 * c.size.max(p.size) || c.x0 < p.x1 - 1.5 * c.size)
-            }
-            None => false,
-        };
-        if split {
-            if let Some(s) = finish_seg(&run) {
-                segs.push(s);
-            }
-            run.clear();
-        }
-        if run.is_empty() || run.iter().all(|p| p.space) {
-            if !c.space {
-                run_base = c.base;
-            }
-        }
-        run.push(c);
-    }
-    if let Some(s) = finish_seg(&run) {
-        segs.push(s);
-    }
-    // rows: segments sharing a baseline
+fn rows_to_lines(mut segs: Vec<Seg>, col: u8) -> Vec<Line> {
     segs.sort_by(|a, b| b.base.partial_cmp(&a.base).unwrap().then(a.x0.partial_cmp(&b.x0).unwrap()));
     let mut rows: Vec<Vec<Seg>> = Vec::new();
     for s in segs {
@@ -191,7 +161,87 @@ pub fn page_lines(page: &PdfPage) -> Page {
         if text.is_empty() {
             continue;
         }
-        lines.push(Line { x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text, tabular });
+        lines.push(Line { col, x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text, tabular });
+    }
+    lines
+}
+
+/// Split a page into reading-order column groups when one clean vertical
+/// gutter runs down it. A narrow side column (letterhead sidebar) comes after
+/// the main column; two comparable columns read left then right. Needs prose
+/// on both sides, so table columns (short cells) are left alone.
+fn split_columns(segs: Vec<Seg>, width: f32) -> Vec<Vec<Seg>> {
+    let prose = |v: &[&Seg]| -> usize { v.iter().filter(|s| s.text.chars().count() >= 20 || s.n >= 20).count() };
+    let mut cands: Vec<f32> = segs.iter().map(|s| s.x1).collect();
+    cands.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    cands.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+    let mut best: Option<(f32, f32)> = None; // (gutter width, split x)
+    for &g in &cands {
+        if g < width * 0.12 || g > width * 0.88 {
+            continue;
+        }
+        let left: Vec<&Seg> = segs.iter().filter(|s| s.x1 <= g + 0.5).collect();
+        let right: Vec<&Seg> = segs.iter().filter(|s| s.x0 > g + 0.5).collect();
+        let cross = segs.len() - left.len() - right.len();
+        if cross * 20 > segs.len() || left.len() < 4 || right.len() < 4 {
+            continue;
+        }
+        let lmax = left.iter().map(|s| s.x1).fold(f32::MIN, f32::max);
+        let rmin = right.iter().map(|s| s.x0).fold(f32::MAX, f32::min);
+        let gap = rmin - lmax;
+        let lc: usize = left.iter().map(|s| s.n).sum();
+        let rc: usize = right.iter().map(|s| s.n).sum();
+        let sidebar = lc.min(rc) * 3 < lc.max(rc);
+        let ok = if sidebar { prose(&left).min(prose(&right)).max(0) >= 1 || lc.min(rc) >= 40 } else { prose(&left) >= 4 && prose(&right) >= 4 };
+        if gap >= 14.0 && ok && best.is_none_or(|(bg, _)| gap > bg) {
+            best = Some((gap, (lmax + rmin) / 2.0));
+        }
+    }
+    let Some((_, x)) = best else { return vec![segs] };
+    let (mut l, mut r, mut cross) = (Vec::new(), Vec::new(), Vec::new());
+    for s in segs {
+        if s.x1 <= x { l.push(s) } else if s.x0 >= x { r.push(s) } else { cross.push(s) }
+    }
+    r.extend(cross); // a stray spanning run belongs with the wider side
+    let lc: usize = l.iter().map(|s| s.n).sum();
+    let rc: usize = r.iter().map(|s| s.n).sum();
+    if lc * 3 < rc { vec![r, l] } else { vec![l, r] }
+}
+
+pub fn page_lines(page: &PdfPage) -> Page {
+    let height = page.height().value;
+    let chars = page_chars(page);
+    // runs: consecutive chars on one baseline moving rightwards
+    let mut segs: Vec<Seg> = Vec::new();
+    let mut run: Vec<Ch> = Vec::new();
+    let mut run_base = 0.0f32;
+    for c in chars {
+        let split = match run.iter().rev().find(|p| !p.space) {
+            Some(p) => {
+                !c.space && ((c.base - run_base).abs() > 0.35 * c.size.max(p.size) || c.x0 < p.x1 - 1.5 * c.size)
+            }
+            None => false,
+        };
+        if split {
+            if let Some(s) = finish_seg(&run) {
+                segs.push(s);
+            }
+            run.clear();
+        }
+        if run.is_empty() || run.iter().all(|p| p.space) {
+            if !c.space {
+                run_base = c.base;
+            }
+        }
+        run.push(c);
+    }
+    if let Some(s) = finish_seg(&run) {
+        segs.push(s);
+    }
+    let width = page.width().value;
+    let mut lines = Vec::new();
+    for (i, g) in split_columns(segs, width).into_iter().enumerate() {
+        lines.extend(rows_to_lines(g, i as u8));
     }
     Page { height, lines }
 }

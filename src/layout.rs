@@ -13,6 +13,8 @@ pub struct Line {
     pub text: String,
     /// The row has wide internal gaps (table-like): keep it on its own line.
     pub tabular: bool,
+    /// Reading-order column group on the page (0 for single-column pages).
+    pub col: u8,
 }
 
 pub struct Page {
@@ -429,6 +431,9 @@ fn right_margin(lines: &[Line]) -> f32 {
 fn sorted_lines(p: &Page) -> Vec<&Line> {
     let mut lines: Vec<&Line> = p.lines.iter().collect();
     lines.sort_by(|a, b| {
+        if a.col != b.col {
+            return a.col.cmp(&b.col);
+        }
         let tol = 0.35 * a.size.max(b.size);
         if (a.base - b.base).abs() <= tol { a.x0.partial_cmp(&b.x0).unwrap() } else { b.base.partial_cmp(&a.base).unwrap() }
     });
@@ -481,7 +486,7 @@ fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
             let hyph = pl.text.ends_with('-');
             let short = !hyph && pl.x1 < right - 10.0 * pl.size;
             let indent = !is_item && l.x0 - pl.x0 > 0.8 * l.size && !pl.tabular && !l.tabular;
-            brk = !style || gap > para_gap * l.size.max(pl.size) || marker.is_some() || indent || gap <= 0.0;
+            brk = !style || gap > para_gap * l.size.max(pl.size) || marker.is_some() || indent || gap <= 0.0 || pl.col != l.col;
             hard = pl.tabular || l.tabular || short;
         }
         let text_after = |m: Option<(Item, usize)>| match m {
@@ -510,6 +515,50 @@ fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
         b.ends_open = !t.ends_with(['.', '!', '?', ':', ';', '"', '”', ')']);
     }
     out
+}
+
+fn looks_like_title(t: &str) -> bool {
+    let words: Vec<&str> = t.split_whitespace().collect();
+    let n = t.chars().count();
+    if words.is_empty() || words.len() > 8 || n > 60 || n < 3 || t.contains('\u{2003}') || t.contains('…') {
+        return false;
+    }
+    if t.ends_with(['.', ',', ';', ':', '?', '!']) || t.chars().last().is_some_and(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    const SMALL: [&str; 14] = ["and", "of", "the", "for", "to", "in", "on", "a", "an", "or", "with", "by", "at", "from"];
+    let first_upper = t.chars().next().is_some_and(|c| c.is_uppercase());
+    first_upper && words.iter().all(|w| SMALL.contains(&w.to_lowercase().as_str()) || w.chars().next().is_some_and(|c| c.is_uppercase() || !c.is_alphabetic()))
+}
+
+/// A short title-case line standing alone above a real paragraph is a section
+/// title even in the body font. Pages that would get many (slides, contents
+/// pages) get none.
+fn promote_section_titles(bl: &mut Vec<Blk>, body: f32) {
+    // A title directly above its paragraph was joined into it as a short first line: split it off.
+    let mut i = 0;
+    let mut hits: Vec<usize> = Vec::new();
+    while i < bl.len() {
+        let styled = bl[i].kind == Kind::Para && bl[i].size >= 0.9 * body && bl[i].size < 1.2 * body;
+        if styled && bl[i].logical.len() >= 2 && looks_like_title(&bl[i].logical[0]) && bl[i].logical[1..].iter().map(|l| l.chars().count()).sum::<usize>() >= 80 {
+            let mut rest = bl[i].clone();
+            rest.logical.remove(0);
+            bl[i].logical.truncate(1);
+            bl.insert(i + 1, rest);
+        }
+        if styled && bl[i].logical.len() == 1 && looks_like_title(&bl[i].logical[0]) {
+            let next = bl.get(i + 1);
+            if next.is_some_and(|n| n.kind == Kind::Para && n.logical.iter().map(|l| l.chars().count()).sum::<usize>() >= 80) {
+                hits.push(i);
+            }
+        }
+        i += 1;
+    }
+    if hits.len() <= 6 {
+        for i in hits {
+            bl[i].kind = Kind::Heading;
+        }
+    }
 }
 
 fn classify_heading(b: &mut Blk, body: f32) -> bool {
@@ -573,6 +622,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
                         b.kind = Kind::Heading;
                     }
                 }
+                promote_section_titles(&mut bl, body);
                 page_blocks.push(bl);
                 ocr_flag.push(None);
             }
@@ -743,7 +793,7 @@ mod tests {
 
     #[test]
     fn double_spaced_text_stays_one_paragraph() {
-        let mk = |i: usize, w: &str| Line { x0: 72.0, x1: 540.0, base: 700.0 - 24.0 * i as f32, size: 12.0, bold: false, text: w.to_string(), tabular: false };
+        let mk = |i: usize, w: &str| Line { x0: 72.0, x1: 540.0, base: 700.0 - 24.0 * i as f32, size: 12.0, bold: false, text: w.to_string(), tabular: false, col: 0 };
         let mut lines: Vec<Line> = (0..6).map(|i| mk(i, "word word word word word word word word word word word word")).collect();
         lines.push(Line { x1: 300.0, ..mk(6, "last line of paragraph one.") });
         lines.extend((8..12).map(|i| mk(i, "second paragraph words words words words words words words")));

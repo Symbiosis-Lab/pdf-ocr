@@ -121,3 +121,17 @@ fn scanned_page_is_ocred() {
     assert!(j["facts"]["title"].is_null());
     assert_eq!(a.stdout, run("scan1.pdf").stdout, "OCR output must be deterministic");
 }
+
+#[test]
+fn side_column_comes_after_the_main_column() {
+    let j = json(&run("sidebar.pdf"));
+    let t = j["fragments"]["text"].as_str().unwrap();
+    let pos = |x: &str| t.find(x).unwrap_or_else(|| panic!("{x} missing:\n{t}"));
+    // the letter reads straight through, sidebar names never land inside its lines
+    assert!(t.contains("Dear Chair Example:"));
+    assert!(!t.lines().any(|l| l.contains("Jane Roe") && l.contains("March")), "{t}");
+    assert!(pos("March 3, 2021") < pos("Jane Roe"));
+    assert!(pos("Purpose") < pos("Jane Roe"));
+    // a body-font title above a paragraph becomes a heading
+    assert!(t.contains("## Purpose") || t.contains("### Purpose"), "{t}");
+}
