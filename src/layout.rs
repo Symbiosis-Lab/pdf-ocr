@@ -526,6 +526,10 @@ fn looks_like_title(t: &str) -> bool {
     if t.ends_with(['.', ',', ';', ':', '?', '!']) || t.chars().last().is_some_and(|c| c.is_ascii_digit()) {
         return false;
     }
+    // a middle initial marks a person's name, not a section title
+    if words.iter().any(|w| w.len() == 2 && w.ends_with('.') && w.chars().next().is_some_and(|c| c.is_uppercase())) {
+        return false;
+    }
     const SMALL: [&str; 14] = ["and", "of", "the", "for", "to", "in", "on", "a", "an", "or", "with", "by", "at", "from"];
     let first_upper = t.chars().next().is_some_and(|c| c.is_uppercase());
     first_upper && words.iter().all(|w| SMALL.contains(&w.to_lowercase().as_str()) || w.chars().next().is_some_and(|c| c.is_uppercase() || !c.is_alphabetic()))
