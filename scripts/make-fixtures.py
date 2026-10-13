@@ -112,7 +112,7 @@ def sidebar_page(n, total):
         st += f"/{font} {size} Tf 1 0 0 1 {x} {y} Tm ({esc(t)}) Tj\n"
     return st + "ET\n"
 
-def _paras(items, top=700, size=11, lead=14, gap=10):
+def _paras(items, top=600, size=11, lead=14, gap=10):
     """items: ('p', [lines]) paragraphs or ('h', text) headings -> content stream."""
     ops, y = [], top
     for kind, v in items:
