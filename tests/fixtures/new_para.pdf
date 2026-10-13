@@ -1,0 +1,53 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 215 >>
+stream
+BT
+/F1 11 Tf 1 0 0 1 72 700 Tm (The review covered every payment made during the year and found that most were) Tj
+/F1 11 Tf 1 0 0 1 72 686 Tm (supported by a signed form, as set out in the following section) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 8 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>
+endobj
+8 0 obj
+<< /Length 187 >>
+stream
+BT
+/F1 11 Tf 1 0 0 1 72 700 Tm (The next section describes the payments that lacked a signed form and the) Tj
+/F1 11 Tf 1 0 0 1 72 686 Tm (steps taken to find the missing records.) Tj
+ET
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000218 00000 n 
+0000000320 00000 n 
+0000000456 00000 n 
+0000000721 00000 n 
+0000000857 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1094
+%%EOF

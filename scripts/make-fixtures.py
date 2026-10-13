@@ -112,6 +112,74 @@ def sidebar_page(n, total):
         st += f"/{font} {size} Tf 1 0 0 1 {x} {y} Tm ({esc(t)}) Tj\n"
     return st + "ET\n"
 
+def _paras(items, top=700, size=11, lead=14, gap=10):
+    """items: ('p', [lines]) paragraphs or ('h', text) headings -> content stream."""
+    ops, y = [], top
+    for kind, v in items:
+        if kind == "h":
+            ops.append(("F2", 14, 72, y, v)); y -= 26
+        else:
+            for l in v:
+                ops.append(("F1", size, 72, y, l)); y -= lead
+            y -= gap
+    st = "BT\n"
+    for font, sz, x, yy, t in ops:
+        st += f"/{font} {sz} Tf 1 0 0 1 {x} {yy} Tm ({esc(t)}) Tj\n"
+    return st + "ET\n"
+
+def para_break_page(n, total):
+    # page 1 ends mid-sentence, with a word hyphenated at the break
+    if n == 1:
+        return _paras([("p", ["The review covered every payment made during the year and found that most were",
+                              "supported by a signed form. The remaining payments were approved by an admin-"])])
+    return _paras([("p", ["istrative office that had no written authority to approve them, and the review",
+                          "recommends that the authority be documented."]),
+                   ("p", ["A second paragraph on the same page ends with a full stop."])])
+
+def new_para_page(n, total):
+    # page 1 ends without punctuation, but page 2 starts a new (capitalised) paragraph
+    if n == 1:
+        return _paras([("p", ["The review covered every payment made during the year and found that most were",
+                              "supported by a signed form, as set out in the following section"])])
+    return _paras([("p", ["The next section describes the payments that lacked a signed form and the",
+                          "steps taken to find the missing records."])])
+
+def heading3_page(n, total):
+    if n == 1:
+        return _paras([("h", "Overview"),
+                       ("p", ["This report describes how the program spent its funds in the year under review",
+                              "and what the auditors found when they checked the records."])])
+    if n == 2:
+        return _paras([("h", "Findings"),
+                       ("p", ["Most payments were supported by a signed form, but a minority were not, and",
+                              "the reasons are set out below."])])
+    return _paras([("p", ["Recommendations follow from the findings above and are listed in order of",
+                          "priority for the Agency."])])
+
+def blank_mid_page(n, total):
+    if n == 2:
+        return "BT\nET\n"
+    return _paras([("p", [["Alpha", "Gamma"][n // 3] + " page text sits here and is long enough to be read as text",
+                          "directly from the page without any recognition step being needed."])])
+
+def build_scan2(path):
+    from PIL import Image, ImageDraw, ImageFont
+    fnt = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 54, index=0)
+    pages = []
+    for lines in (["Scanned Report to the Commissioner", "",
+                   "We write to confirm receipt of the building permit application",
+                   "submitted on the first of March. The application is complete and",
+                   "the committee will review the file and will send a letter in the"],
+                  ["coming weeks to say what happens next.", "",
+                   "Sincerely,", "The Permit Office"]):
+        img = Image.new("L", (2550, 3300), 255)
+        d = ImageDraw.Draw(img)
+        y = 400
+        for l in lines:
+            d.text((300, y), l, fill=0, font=fnt); y += 90
+        pages.append(img)
+    pages[0].save(path, "PDF", resolution=300.0, save_all=True, append_images=pages[1:])
+
 def build_scan(path):
     from PIL import Image, ImageDraw, ImageFont
     img = Image.new("L", (2550, 3300), 255)
@@ -137,5 +205,10 @@ if __name__ == "__main__":
     build_text_pdf(os.path.join(OUT, "text3.pdf"))
     build_text_pdf(os.path.join(OUT, "sidebar.pdf"), 1, sidebar_page)
     build_scan(os.path.join(OUT, "scan1.pdf"))
+    build_scan2(os.path.join(OUT, "scan2.pdf"))
+    build_text_pdf(os.path.join(OUT, "para_break.pdf"), 2, para_break_page)
+    build_text_pdf(os.path.join(OUT, "new_para.pdf"), 2, new_para_page)
+    build_text_pdf(os.path.join(OUT, "heading3.pdf"), 3, heading3_page)
+    build_text_pdf(os.path.join(OUT, "blank_mid.pdf"), 3, blank_mid_page)
     build_encrypted(os.path.join(OUT, "text3.pdf"), os.path.join(OUT, "encrypted.pdf"))
     open(os.path.join(OUT, "notpdf.pdf"), "w").write("This is just a text file, not a PDF.\n")
