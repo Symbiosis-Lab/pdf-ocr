@@ -195,6 +195,14 @@ def build_scan(path):
         d.text((300, y), l, fill=0, font=fnt); y += 90
     img.save(path, "PDF", resolution=300.0)
 
+def build_mixed(text_src, scan_src, path):
+    """Page 1 from a text PDF, page 2 a scan: a partly scanned document."""
+    from pypdf import PdfReader, PdfWriter
+    w = PdfWriter()
+    w.add_page(PdfReader(text_src).pages[0])
+    w.add_page(PdfReader(scan_src).pages[0])
+    w.write(path)
+
 def build_encrypted(src, path):
     from pypdf import PdfReader, PdfWriter
     w = PdfWriter(clone_from=PdfReader(src))
@@ -210,5 +218,6 @@ if __name__ == "__main__":
     build_text_pdf(os.path.join(OUT, "new_para.pdf"), 2, new_para_page)
     build_text_pdf(os.path.join(OUT, "heading3.pdf"), 3, heading3_page)
     build_text_pdf(os.path.join(OUT, "blank_mid.pdf"), 3, blank_mid_page)
+    build_mixed(os.path.join(OUT, "heading3.pdf"), os.path.join(OUT, "scan1.pdf"), os.path.join(OUT, "mixed.pdf"))
     build_encrypted(os.path.join(OUT, "text3.pdf"), os.path.join(OUT, "encrypted.pdf"))
     open(os.path.join(OUT, "notpdf.pdf"), "w").write("This is just a text file, not a PDF.\n")

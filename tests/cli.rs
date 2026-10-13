@@ -48,7 +48,7 @@ fn text_pdf_markdown() {
     let o = run("text3.pdf");
     let raw = String::from_utf8(o.stdout.clone()).unwrap();
     assert!(raw.starts_with("{\"kind\":\"derived\",\"fragments\":{\"text\":"), "key order: {raw}");
-    assert!(raw.trim_end().ends_with("\"facts\":{\"title\":\"Audit of Example Program Controls\"}}"));
+    assert!(raw.trim_end().ends_with("\"facts\":{\"title\":\"Audit of Example Program Controls\",\"description\":\"3 pages\"}}"));
     let j = json(&o);
     let t = j["fragments"]["text"].as_str().unwrap();
     // headings: start at ##, title is not repeated
@@ -134,4 +134,132 @@ fn side_column_comes_after_the_main_column() {
     assert!(pos("Purpose") < pos("Jane Roe"));
     // a body-font title above a paragraph becomes a heading
     assert!(t.contains("## Purpose") || t.contains("### Purpose"), "{t}");
+}
+
+fn text_of(name: &str) -> (String, Value) {
+    let j = json(&run(name));
+    (j["fragments"]["text"].as_str().unwrap().to_string(), j["facts"].clone())
+}
+
+const NOTE_ALL: &str = "> [!note]\n> This text was read by machine from a scan and can contain errors. The PDF is the document of record; a page number opens it at that page.\n\n";
+
+#[test]
+fn page_markers_precede_headings_and_open_paragraphs() {
+    let (t, facts) = text_of("heading3.pdf");
+    // page 2 begins with a heading: the marker is its own paragraph just before it
+    assert!(t.contains("records.\n\n[[heading3.pdf#page=2|p. 2]]\n\n## Findings\n\n"), "{t}");
+    // page 3 begins with a paragraph: the marker is the first thing in it
+    assert!(t.contains("\n\n[[heading3.pdf#page=3|p. 3]] Recommendations follow"), "{t}");
+    assert!(!t.contains("page=1"), "page 1 gets no marker:\n{t}");
+    assert_eq!(facts["title"], "Overview");
+    assert_eq!(facts["description"], "3 pages");
+    assert!(!t.contains("[!note]"));
+}
+
+#[test]
+fn paragraph_running_across_a_page_break_is_one_block_with_an_inline_marker() {
+    let (t, facts) = text_of("para_break.pdf");
+    // "admin-" / "istrative" is repaired, the marker follows the repaired word
+    assert!(t.contains("approved by an administrative [[para_break.pdf#page=2|p. 2]] office that had no written authority"), "{t}");
+    assert_eq!(t.split("\n\n").count(), 2, "joined paragraph + the second paragraph:\n{t}");
+    assert!(t.starts_with("The review covered"), "{t}");
+    assert_eq!(facts["description"], "2 pages");
+}
+
+#[test]
+fn capitalised_page_start_is_not_joined() {
+    let (t, _) = text_of("new_para.pdf");
+    assert!(t.contains("following section\n\n[[new_para.pdf#page=2|p. 2]] The next section describes"), "{t}");
+}
+
+#[test]
+fn file_name_with_wikilink_syntax_gets_no_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    for bad in ["a|b.pdf", "a[b.pdf", "a]b.pdf"] {
+        let dst = dir.path().join(bad);
+        std::fs::copy(fixture("heading3.pdf"), &dst).unwrap();
+        let j = json(&run_stdin(&format!("{{\"path\":{}}}", serde_json::to_string(dst.to_str().unwrap()).unwrap())));
+        let t = j["fragments"]["text"].as_str().unwrap();
+        assert!(!t.contains("[[") && !t.contains("p. 2"), "{bad}: {t}");
+        assert!(t.contains("## Findings"));
+    }
+}
+
+#[test]
+fn scanned_document_has_note_markers_joins_and_description() {
+    if !have_tesseract() {
+        eprintln!("NOTE: tesseract not installed; skipping OCR test");
+        return;
+    }
+    let (t, facts) = text_of("scan2.pdf");
+    assert!(t.starts_with(NOTE_ALL), "{t}");
+    assert!(t.contains("will send a letter in the [[scan2.pdf#page=2|p. 2]] coming weeks to say what happens next."), "{t}");
+    assert!(!t.contains("page=1"));
+    assert!(facts["title"].is_null(), "neither the note nor a marker may become the title: {facts}");
+    assert_eq!(facts["description"], "2 pages, scanned");
+}
+
+#[test]
+fn one_page_scan_note_drops_the_page_clause() {
+    if !have_tesseract() {
+        return;
+    }
+    let (t, facts) = text_of("scan1.pdf");
+    assert!(t.starts_with("> [!note]\n> This text was read by machine from a scan and can contain errors. The PDF is the document of record.\n\n"), "{t}");
+    assert!(!t.contains("[[scan1.pdf"), "{t}");
+    assert_eq!(facts["description"], "1 page, scanned");
+}
+
+#[test]
+fn partly_scanned_document() {
+    if !have_tesseract() {
+        return;
+    }
+    let (t, facts) = text_of("mixed.pdf");
+    assert!(t.starts_with("> [!note]\n> Parts of this text were read by machine from scanned pages and can contain errors. The PDF is the document of record; a page number opens it at that page.\n\n"), "{t}");
+    assert!(t.contains("[[mixed.pdf#page=2|p. 2]] Scanned Letter to the Commissioner"), "{t}");
+    assert_eq!(facts["description"], "2 pages, partly scanned");
+    assert_eq!(facts["title"], "Overview");
+}
+
+#[test]
+fn page_without_text_still_gets_its_marker() {
+    if !have_tesseract() {
+        return;
+    }
+    let (t, facts) = text_of("blank_mid.pdf");
+    assert!(t.contains("needed.\n\n[[blank_mid.pdf#page=2|p. 2]]\n\n[[blank_mid.pdf#page=3|p. 3]] Gamma page text"), "{t}");
+    assert!(!t.contains("[!note]"), "a blank page is not evidence of a scan");
+    assert_eq!(facts["description"], "3 pages");
+}
+
+#[test]
+fn ocr_cache_is_read_back_and_off_by_default() {
+    if !have_tesseract() {
+        return;
+    }
+    let cache = tempfile::tempdir().unwrap();
+    let go = |cache: Option<&std::path::Path>| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_moss-docs"));
+        c.env("MOSS_DOCS_PDFIUM", pdfium()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        c.env_remove("MOSS_DOCS_OCR_CACHE");
+        if let Some(d) = cache {
+            c.env("MOSS_DOCS_OCR_CACHE", d);
+        }
+        let mut ch = c.spawn().unwrap();
+        ch.stdin.take().unwrap().write_all(format!("{{\"path\":{}}}", serde_json::to_string(&fixture("scan1.pdf")).unwrap()).as_bytes()).unwrap();
+        String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap()
+    };
+    let plain = go(None);
+    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 0);
+    let first = go(Some(cache.path()));
+    assert_eq!(first, plain, "caching must not change the output");
+    let files: Vec<_> = std::fs::read_dir(cache.path()).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(files.len(), 1);
+    let name = files[0].file_name().unwrap().to_str().unwrap().to_string();
+    assert_eq!(name.len(), 64 + ".txt".len(), "{name}");
+    assert_eq!(go(Some(cache.path())), plain);
+    // the entry is what the next run reads
+    std::fs::write(&files[0], "Words that only the cache holds, long enough to count as text.\n").unwrap();
+    assert!(go(Some(cache.path())).contains("Words that only the cache holds"));
 }
