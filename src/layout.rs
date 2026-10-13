@@ -333,9 +333,11 @@ fn ocr_blocks(text: &str, vocab: &Vocab) -> Vec<Blk> {
 }
 
 /// A block whose last line lacks sentence-final punctuation (optionally
-/// followed by closing quotes or brackets) may continue on the next page.
+/// followed by closing quotes or brackets) may continue on the next page. A
+/// semicolon or a colon does not end a sentence: "…protected groups;" at the
+/// foot of a page is followed by "participate in career fairs…" on the next.
 fn ends_open(t: &str) -> bool {
-    !t.trim_end_matches(['"', '\'', '”', '’', ')', ']', '»']).ends_with(['.', '?', '!', ':', ';'])
+    !t.trim_end_matches(['"', '\'', '”', '’', ')', ']', '»']).ends_with(['.', '?', '!'])
 }
 
 // ---------- document-level pipeline ----------
@@ -956,10 +958,10 @@ mod tests {
 
     #[test]
     fn closing_quotes_and_brackets_after_final_punctuation_close_a_block() {
-        for closed in ["He said \"stop.\"", "It ended (finally.)", "Is it so?”", "Note:"] {
+        for closed in ["He said \"stop.\"", "It ended (finally.)", "Is it so?”"] {
             assert!(!ends_open(closed), "{closed}");
         }
-        for open in ["It ended (see page 3)", "and then", "x,"] {
+        for open in ["It ended (see page 3)", "and then", "x,", "protected groups;", "Note:"] {
             assert!(ends_open(open), "{open}");
         }
     }
