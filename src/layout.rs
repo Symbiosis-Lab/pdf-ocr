@@ -317,8 +317,16 @@ fn ocr_blocks(text: &str, vocab: &Vocab) -> Vec<Blk> {
                 Some((it, _)) => (Kind::Item(it), s),
                 None => (Kind::Para, s),
             };
-            let ends_open = ends_open(&text);
-            blocks.push(Blk { kind, logical: vec![text], size: 0.0, bold: false, ends_open, tabular: false });
+            let open = ends_open(&text);
+            // Tesseract sets a short last line apart as its own paragraph.
+            let widow = kind == Kind::Para && text.chars().next().is_some_and(|c| c.is_lowercase());
+            match blocks.last_mut() {
+                Some(prev) if widow && prev.ends_open => {
+                    join_wrapped(prev.logical.last_mut().unwrap(), &text, vocab);
+                    prev.ends_open = open;
+                }
+                _ => blocks.push(Blk { kind, logical: vec![text], size: 0.0, bold: false, ends_open: open, tabular: false }),
+            }
         }
     }
     blocks
@@ -929,6 +937,12 @@ mod tests {
         assert!(note_free(&md).contains("2. Beta item.\n3. [p. 2](x.pdf#page=2) Gamma item.\n\nClosing"), "{md}");
         let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item.", "1. Restarted item.\n\nClosing line."]);
         assert!(note_free(&md).contains("2. Beta item.\n\n1. [p. 2](x.pdf#page=2) Restarted"), "{md}");
+    }
+
+    #[test]
+    fn ocr_widow_line_rejoins_its_item() {
+        let md = ocr(&["1. First item that runs on and on and\n\ncandidates.\n2. Second.\n\nNew paragraph."]);
+        assert_eq!(note_free(&md), "1. First item that runs on and on and candidates.\n2. Second.\n\nNew paragraph.");
     }
 
     #[test]
