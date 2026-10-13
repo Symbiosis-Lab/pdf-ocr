@@ -147,9 +147,9 @@ const NOTE_ALL: &str = "> [!note]\n> This text was read by machine from a scan a
 fn page_markers_precede_headings_and_open_paragraphs() {
     let (t, facts) = text_of("heading3.pdf");
     // page 2 begins with a heading: the marker is its own paragraph just before it
-    assert!(t.contains("records.\n\n[[heading3.pdf#page=2|p. 2]]\n\n## Findings\n\n"), "{t}");
+    assert!(t.contains("records.\n\n[p. 2](heading3.pdf#page=2)\n\n## Findings\n\n"), "{t}");
     // page 3 begins with a paragraph: the marker is the first thing in it
-    assert!(t.contains("\n\n[[heading3.pdf#page=3|p. 3]] Recommendations follow"), "{t}");
+    assert!(t.contains("\n\n[p. 3](heading3.pdf#page=3) Recommendations follow"), "{t}");
     assert!(!t.contains("page=1"), "page 1 gets no marker:\n{t}");
     assert_eq!(facts["title"], "Overview");
     assert_eq!(facts["description"], "3 pages");
@@ -160,7 +160,7 @@ fn page_markers_precede_headings_and_open_paragraphs() {
 fn paragraph_running_across_a_page_break_is_one_block_with_an_inline_marker() {
     let (t, facts) = text_of("para_break.pdf");
     // "admin-" / "istrative" is repaired, the marker follows the repaired word
-    assert!(t.contains("approved by an administrative [[para_break.pdf#page=2|p. 2]] office that had no written authority"), "{t}");
+    assert!(t.contains("approved by an administrative [p. 2](para_break.pdf#page=2) office that had no written authority"), "{t}");
     assert_eq!(t.split("\n\n").count(), 2, "joined paragraph + the second paragraph:\n{t}");
     assert!(t.starts_with("The review covered"), "{t}");
     assert_eq!(facts["description"], "2 pages");
@@ -169,20 +169,18 @@ fn paragraph_running_across_a_page_break_is_one_block_with_an_inline_marker() {
 #[test]
 fn capitalised_page_start_is_not_joined() {
     let (t, _) = text_of("new_para.pdf");
-    assert!(t.contains("following section\n\n[[new_para.pdf#page=2|p. 2]] The next section describes"), "{t}");
+    assert!(t.contains("following section\n\n[p. 2](new_para.pdf#page=2) The next section describes"), "{t}");
 }
 
 #[test]
-fn file_name_with_wikilink_syntax_gets_no_markers() {
+fn file_name_is_percent_encoded_in_markers() {
     let dir = tempfile::tempdir().unwrap();
-    for bad in ["a|b.pdf", "a[b.pdf", "a]b.pdf"] {
-        let dst = dir.path().join(bad);
-        std::fs::copy(fixture("heading3.pdf"), &dst).unwrap();
-        let j = json(&run_stdin(&format!("{{\"path\":{}}}", serde_json::to_string(dst.to_str().unwrap()).unwrap())));
-        let t = j["fragments"]["text"].as_str().unwrap();
-        assert!(!t.contains("[[") && !t.contains("p. 2"), "{bad}: {t}");
-        assert!(t.contains("## Findings"));
-    }
+    let dst = dir.path().join("rapport (é) 2019.pdf");
+    std::fs::copy(fixture("heading3.pdf"), &dst).unwrap();
+    let j = json(&run_stdin(&format!("{{\"path\":{}}}", serde_json::to_string(dst.to_str().unwrap()).unwrap())));
+    let t = j["fragments"]["text"].as_str().unwrap();
+    assert!(t.contains("\n\n[p. 2](rapport%20%28%C3%A9%29%202019.pdf#page=2)\n\n## Findings"), "{t}");
+    assert!(t.contains("[p. 3](rapport%20%28%C3%A9%29%202019.pdf#page=3) Recommendations"), "{t}");
 }
 
 #[test]
@@ -193,7 +191,7 @@ fn scanned_document_has_note_markers_joins_and_description() {
     }
     let (t, facts) = text_of("scan2.pdf");
     assert!(t.starts_with(NOTE_ALL), "{t}");
-    assert!(t.contains("will send a letter in the [[scan2.pdf#page=2|p. 2]] coming weeks to say what happens next."), "{t}");
+    assert!(t.contains("will send a letter in the [p. 2](scan2.pdf#page=2) coming weeks to say what happens next."), "{t}");
     assert!(!t.contains("page=1"));
     assert!(facts["title"].is_null(), "neither the note nor a marker may become the title: {facts}");
     assert_eq!(facts["description"], "2 pages, scanned");
@@ -206,7 +204,7 @@ fn one_page_scan_note_drops_the_page_clause() {
     }
     let (t, facts) = text_of("scan1.pdf");
     assert!(t.starts_with("> [!note]\n> This text was read by machine from a scan and can contain errors. The PDF is the document of record.\n\n"), "{t}");
-    assert!(!t.contains("[[scan1.pdf"), "{t}");
+    assert!(!t.contains("#page="), "{t}");
     assert_eq!(facts["description"], "1 page, scanned");
 }
 
@@ -217,7 +215,7 @@ fn partly_scanned_document() {
     }
     let (t, facts) = text_of("mixed.pdf");
     assert!(t.starts_with("> [!note]\n> Parts of this text were read by machine from scanned pages and can contain errors. The PDF is the document of record; a page number opens it at that page.\n\n"), "{t}");
-    assert!(t.contains("[[mixed.pdf#page=2|p. 2]] Scanned Letter to the Commissioner"), "{t}");
+    assert!(t.contains("[p. 2](mixed.pdf#page=2) Scanned Letter to the Commissioner"), "{t}");
     assert_eq!(facts["description"], "2 pages, partly scanned");
     assert_eq!(facts["title"], "Overview");
 }
@@ -228,7 +226,7 @@ fn page_without_text_still_gets_its_marker() {
         return;
     }
     let (t, facts) = text_of("blank_mid.pdf");
-    assert!(t.contains("needed.\n\n[[blank_mid.pdf#page=2|p. 2]]\n\n[[blank_mid.pdf#page=3|p. 3]] Gamma page text"), "{t}");
+    assert!(t.contains("needed.\n\n[p. 2](blank_mid.pdf#page=2)\n\n[p. 3](blank_mid.pdf#page=3) Gamma page text"), "{t}");
     assert!(!t.contains("[!note]"), "a blank page is not evidence of a scan");
     assert_eq!(facts["description"], "3 pages");
 }

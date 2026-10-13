@@ -1,6 +1,6 @@
 {
   "name": "moss-docs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows a folder's PDFs as pages: extracts each document's text, reading scanned pages by OCR.",
   "contributes": {
     "derivations": {

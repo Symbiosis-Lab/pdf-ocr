@@ -43,11 +43,17 @@ struct Blk {
     size: f32,
     bold: bool,
     ends_open: bool,
+    /// Made of table-like rows: never joined across a page break.
+    tabular: bool,
 }
 
 pub struct Rendered {
     pub markdown: String,
     pub title: Option<String>,
+    /// "<n> pages", plus ", scanned" / ", partly scanned" when OCR was used.
+    pub description: String,
+    /// Non-whitespace characters of the document text itself (no note, no page markers).
+    pub body_chars: usize,
 }
 
 /// One input page: its text lines, or already-recognised (OCR) markdown.
@@ -290,37 +296,38 @@ fn strip_ocr_running(pages: &mut [&mut String]) {
     }
 }
 
-pub fn ocr_to_markdown(text: &str, vocab: &Vocab) -> String {
-    let mut blocks: Vec<String> = Vec::new();
-    for para in text.split("\n\n") {
+fn ocr_blocks(text: &str, vocab: &Vocab) -> Vec<Blk> {
+    let mut blocks: Vec<Blk> = Vec::new();
+    for para in text.replace(MARK, "").split("\n\n") {
         let mut cur: Vec<String> = Vec::new();
         for raw in para.lines() {
             let l = raw.trim();
             if l.is_empty() {
                 continue;
             }
-            let is_item = list_marker(l).is_some();
-            if is_item || cur.is_empty() {
+            if cur.is_empty() || list_marker(l).is_some() {
                 cur.push(l.to_string());
             } else {
-                let last = cur.last_mut().unwrap();
-                join_wrapped(last, l, vocab);
+                join_wrapped(cur.last_mut().unwrap(), l, vocab);
             }
         }
-        for item in cur {
-            blocks.push(render_oneline(&item));
+        for s in cur {
+            let (kind, text) = match list_marker(&s) {
+                Some((Item::Bullet, n)) => (Kind::Item(Item::Bullet), s[n..].to_string()),
+                Some((it, _)) => (Kind::Item(it), s),
+                None => (Kind::Para, s),
+            };
+            let ends_open = ends_open(&text);
+            blocks.push(Blk { kind, logical: vec![text], size: 0.0, bold: false, ends_open, tabular: false });
         }
     }
-    blocks.join("\n\n")
+    blocks
 }
 
-fn render_oneline(s: &str) -> String {
-    let (prefix, rest) = match list_marker(s) {
-        Some((Item::Bullet, n)) => ("- ".to_string(), &s[n..]),
-        Some((Item::Numbered, _)) => return escape_inline(s),
-        _ => (String::new(), s),
-    };
-    format!("{prefix}{}", escape_line_start(&escape_inline(rest)))
+/// A block whose last line lacks sentence-final punctuation (optionally
+/// followed by closing quotes or brackets) may continue on the next page.
+fn ends_open(t: &str) -> bool {
+    !t.trim_end_matches(['"', '\'', '”', '’', ')', ']', '»']).ends_with(['.', '?', '!', ':', ';'])
 }
 
 // ---------- document-level pipeline ----------
@@ -498,9 +505,10 @@ fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
                 Some((it, _)) => Kind::Item(it),
                 None => Kind::Para,
             };
-            out.push(Blk { kind, logical: vec![text_after(marker)], size: l.size, bold: l.bold, ends_open: false });
+            out.push(Blk { kind, logical: vec![text_after(marker)], size: l.size, bold: l.bold, ends_open: false, tabular: l.tabular });
         } else {
             let b = out.last_mut().unwrap();
+            b.tabular |= l.tabular;
             if hard {
                 b.logical.push(l.text.clone());
             } else {
@@ -512,7 +520,7 @@ fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
     }
     for b in &mut out {
         let t = b.logical.last().map(String::as_str).unwrap_or("");
-        b.ends_open = !t.ends_with(['.', '!', '?', ':', ';', '"', '”', ')']);
+        b.ends_open = ends_open(t);
     }
     out
 }
@@ -589,7 +597,133 @@ fn classify_heading(b: &mut Blk, body: f32) -> bool {
     true
 }
 
-pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
+/// Delimits a page marker while the text is assembled. Marker text must not go
+/// through inline escaping, so it is written last.
+/// U+FFFF is dropped from every input, so it cannot occur in the text itself.
+const MARK: char = '\u{FFFF}';
+
+fn mark(n: usize) -> String {
+    format!("{MARK}{n}{MARK}")
+}
+
+fn strip_marks(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut inside = false;
+    for c in s.chars() {
+        if c == MARK {
+            inside = !inside;
+        } else if !inside {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn expand_marks(s: &str, file: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 64);
+    let mut num = String::new();
+    let mut inside = false;
+    for c in s.chars() {
+        match (c == MARK, inside) {
+            (true, false) => inside = true,
+            (true, true) => {
+                out.push_str(&format!("[p. {num}]({}#page={num})", url_segment(file)));
+                num.clear();
+                inside = false;
+            }
+            (false, true) => num.push(c),
+            (false, false) => out.push(c),
+        }
+    }
+    out
+}
+
+/// Percent-encode a file name as one URL path segment: ASCII letters, digits
+/// and `-._~` stay, every other byte of its UTF-8 becomes `%XX`.
+fn url_segment(name: &str) -> String {
+    let mut out = String::new();
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+fn leading_number(s: &str) -> Option<u32> {
+    let d: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+    d.parse().ok()
+}
+
+/// Rendered parts in order. Consecutive list items are tight; across a page
+/// break a numbered list stays one list only if the numbers carry on.
+#[derive(Default)]
+struct Emit {
+    parts: Vec<(String, bool)>,
+    /// Last part was a list item: its number, if numbered.
+    prev_item: Option<Option<u32>>,
+}
+
+impl Emit {
+    fn block(&mut self, b: &Blk, lvl: usize, page_start: bool) {
+        let numbered = b.kind == Kind::Item(Item::Numbered);
+        let item = numbered || b.kind == Kind::Item(Item::Bullet);
+        let number = if numbered { leading_number(&b.logical[0]) } else { None };
+        let tight = item
+            && self.prev_item.is_some_and(|p| match (page_start, p, number) {
+                (false, ..) => true,
+                (true, Some(a), Some(n)) => n == a + 1,
+                (true, None, None) => true,
+                _ => false,
+            });
+        self.parts.push((render_block(b, lvl), tight));
+        self.prev_item = item.then_some(number);
+    }
+
+    fn paragraph(&mut self, s: String) {
+        self.parts.push((s, false));
+        self.prev_item = None;
+    }
+}
+
+/// Append `first` (the start of the next page) to the open block `c`, with the
+/// page marker at the join. A word hyphenated across the break is repaired and
+/// the marker goes after it.
+fn join_across(c: &mut Blk, first: &str, page: Option<usize>, vocab: &Vocab) {
+    let last = c.logical.last_mut().unwrap();
+    let Some(n) = page else {
+        return join_wrapped(last, first, vocab);
+    };
+    let cut_word = last.strip_suffix('-').and_then(|s| s.chars().last()).is_some_and(|ch| ch.is_alphabetic());
+    if cut_word {
+        let (head, tail) = first.split_once(' ').unwrap_or((first, ""));
+        join_wrapped(last, head, vocab);
+        last.push(' ');
+        last.push_str(&mark(n));
+        if !tail.is_empty() {
+            last.push(' ');
+            last.push_str(tail);
+        }
+    } else {
+        last.push(' ');
+        last.push_str(&mark(n));
+        last.push(' ');
+        last.push_str(first);
+    }
+}
+
+/// Put the marker first in a paragraph or list item (after the number of a numbered one).
+fn prefix_marker(b: &mut Blk, n: usize) {
+    let at = if b.kind == Kind::Item(Item::Numbered) { list_marker(&b.logical[0]).map_or(0, |m| m.1) } else { 0 };
+    b.logical[0].insert_str(at, &format!("{} ", mark(n)));
+}
+
+const NOTE_LEAD_ALL: &str = "This text was read by machine from a scan and can contain errors.";
+const NOTE_LEAD_SOME: &str = "Parts of this text were read by machine from scanned pages and can contain errors.";
+
+pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &str) -> Rendered {
     // 1. running headers/footers over the text pages
     let mut contents = contents;
     {
@@ -616,7 +750,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
 
     // 2. blocks per page, headings classified
     let mut page_blocks: Vec<Vec<Blk>> = Vec::new();
-    let mut ocr_flag: Vec<Option<String>> = Vec::new();
+    let mut is_ocr: Vec<bool> = Vec::new();
     for c in &contents {
         match c {
             Content::Lines(p) => {
@@ -628,19 +762,16 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
                 }
                 promote_section_titles(&mut bl, body);
                 page_blocks.push(bl);
-                ocr_flag.push(None);
             }
-            Content::Ocr(t) => {
-                page_blocks.push(Vec::new());
-                ocr_flag.push(Some(ocr_to_markdown(t, &vocab)));
-            }
+            Content::Ocr(t) => page_blocks.push(ocr_blocks(t, &vocab)),
         }
+        is_ocr.push(matches!(c, Content::Ocr(_)));
     }
 
     // 3. title from the first text page
     let mut title: Option<String> = None;
     let mut drop_title: Option<(usize, usize)> = None;
-    if let Some((pi, bl)) = page_blocks.iter().enumerate().find(|(i, b)| ocr_flag[*i].is_none() && !b.is_empty()) {
+    if let Some((pi, bl)) = page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty()) {
         let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.kind == Kind::Heading && b.size >= 1.2 * body).collect();
         cands.sort_by(|(ia, a), (ib, b)| b.size.partial_cmp(&a.size).unwrap().then(ia.cmp(ib)));
         for (bi, b) in cands {
@@ -665,65 +796,86 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>) -> Rendered {
     keys.dedup();
     let level = |b: &Blk| -> usize { keys.iter().position(|k| *k == key(b)).unwrap_or(0).min(2) };
 
-    // 5. flatten, merge paragraphs across page breaks, render
-    let mut parts: Vec<(String, bool)> = Vec::new(); // (markdown, tight-with-previous)
-    let mut carry: Option<Blk> = None; // last paragraph of previous text page awaiting a continuation
-    let flush = |carry: &mut Option<Blk>, parts: &mut Vec<(String, bool)>| {
-        if let Some(b) = carry.take() {
-            parts.push((render_block(&b, 0), false));
-        }
-    };
-    let mut prev_item = false;
+    // 5. flatten with page markers; a paragraph or item left open at the end of
+    // a page continues into a lowercase paragraph at the top of the next
+        let mut e = Emit::default();
+    let mut carry: Option<(Blk, bool)> = None; // open block of the previous page, was it first on its page
     for (pi, bl) in page_blocks.iter().enumerate() {
-        if let Some(t) = ocr_flag[pi].as_ref() {
-            flush(&mut carry, &mut parts);
-            if !t.is_empty() {
-                parts.push((t.clone(), false));
+        let marker = (pi > 0).then_some(pi + 1);
+        let blocks: Vec<&Blk> = bl.iter().enumerate().filter(|(bi, _)| drop_title != Some((pi, *bi))).map(|(_, b)| b).collect();
+        if blocks.is_empty() {
+            if let Some((c, start)) = carry.take() {
+                e.block(&c, 0, start);
             }
-            prev_item = false;
+            if let Some(n) = marker {
+                e.paragraph(mark(n));
+            }
             continue;
         }
-        let n = bl.len();
-        for (bi, b) in bl.iter().enumerate() {
-            if drop_title == Some((pi, bi)) {
-                continue;
-            }
-            let mut b = b.clone();
-            if let Some(mut c) = carry.take() {
-                let starts_lower = b.logical[0].chars().next().is_some_and(|ch| ch.is_lowercase());
-                if bi == 0 && b.kind == Kind::Para && starts_lower && c.ends_open {
-                    let first = b.logical.remove(0);
-                    let last = c.logical.last_mut().unwrap();
-                    join_wrapped(last, &first, &vocab);
-                    c.logical.extend(b.logical.drain(..));
-                    c.ends_open = b.ends_open;
-                    b = c;
-                } else {
-                    parts.push((render_block(&c, 0), false));
+        for (bi, b) in blocks.iter().enumerate() {
+            let mut b = (*b).clone();
+            let mut page_start = bi == 0;
+            if bi == 0 {
+                let mut marked = false;
+                if let Some((mut c, c_start)) = carry.take() {
+                    if b.kind == Kind::Para && !b.tabular && b.logical[0].chars().next().is_some_and(|ch| ch.is_lowercase()) {
+                        let first = b.logical.remove(0);
+                        join_across(&mut c, &first, marker, &vocab);
+                        c.logical.append(&mut b.logical);
+                        c.ends_open = b.ends_open;
+                        b = c;
+                        page_start = c_start;
+                        marked = true;
+                    } else {
+                        e.block(&c, 0, c_start);
+                    }
+                }
+                if let (Some(n), false) = (marker, marked) {
+                    if matches!(b.kind, Kind::Para | Kind::Item(_)) && !b.tabular {
+                        prefix_marker(&mut b, n);
+                    } else {
+                        e.paragraph(mark(n));
+                    }
                 }
             }
-            let last_on_page = bi + 1 == n;
-            if last_on_page && b.kind == Kind::Para && b.ends_open {
-                carry = Some(b);
+            if bi + 1 == blocks.len() && matches!(b.kind, Kind::Para | Kind::Item(_)) && !b.tabular && b.ends_open {
+                carry = Some((b, page_start));
                 continue;
             }
             let lvl = if b.kind == Kind::Heading { level(&b) } else { 0 };
-            let is_item = matches!(b.kind, Kind::Item(Item::Bullet) | Kind::Item(Item::Numbered));
-            let tight = is_item && prev_item;
-            prev_item = is_item;
-            parts.push((render_block(&b, lvl), tight));
+            e.block(&b, lvl, page_start);
         }
     }
-    flush(&mut carry, &mut parts);
+    if let Some((c, start)) = carry.take() {
+        e.block(&c, 0, start);
+    }
 
     let mut md = String::new();
-    for (i, (s, tight)) in parts.iter().enumerate() {
+    for (i, (s, tight)) in e.parts.iter().enumerate() {
         if i > 0 {
             md.push_str(if *tight { "\n" } else { "\n\n" });
         }
         md.push_str(s);
     }
-    Rendered { markdown: md, title }
+    let body_chars = strip_marks(&md).chars().filter(|c| !c.is_whitespace()).count();
+
+    // 6. the note and the description. A blank page that went through OCR is
+    // neutral: it says nothing about whether the document is a scan.
+    let pages = page_blocks.len();
+    let ocr_pages = is_ocr.iter().filter(|o| **o).count();
+    let ocr_read = page_blocks.iter().zip(&is_ocr).filter(|(b, o)| **o && !b.is_empty()).count();
+    let mut description = if pages == 1 { "1 page".to_string() } else { format!("{pages} pages") };
+    if ocr_read > 0 {
+        let all_ocr = ocr_pages == pages;
+        description.push_str(if all_ocr { ", scanned" } else { ", partly scanned" });
+        let lead = if all_ocr { NOTE_LEAD_ALL } else { NOTE_LEAD_SOME };
+        let record = match pages {
+            1 => "The PDF is the document of record.",
+            _ => "The PDF is the document of record; a page number opens it at that page.",
+        };
+        md = format!("> [!note]\n> {lead} {record}\n\n{md}");
+    }
+    Rendered { markdown: expand_marks(&md, file_name), title, description, body_chars }
 }
 
 fn render_block(b: &Blk, lvl: usize) -> String {
@@ -756,6 +908,54 @@ fn item_text(prefix: &str, b: &Blk) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ocr(pages: &[&str]) -> String {
+        render(pages.iter().map(|p| Content::Ocr(p.to_string())).collect(), None, "x.pdf").markdown
+    }
+
+    fn note_free(md: &str) -> &str {
+        md.split_once("\n\n").unwrap().1
+    }
+
+    #[test]
+    fn open_item_continues_and_the_list_goes_on() {
+        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item continues with the", "next words here.\n3. Gamma item."]);
+        assert_eq!(note_free(&md), "Opening line.\n\n1. Alpha item.\n2. Beta item continues with the [p. 2](x.pdf#page=2) next words here.\n3. Gamma item.");
+    }
+
+    #[test]
+    fn numbered_list_resuming_on_a_page_is_tight_only_if_numbers_follow() {
+        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item.", "3. Gamma item.\n\nClosing line."]);
+        assert!(note_free(&md).contains("2. Beta item.\n3. [p. 2](x.pdf#page=2) Gamma item.\n\nClosing"), "{md}");
+        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item.", "1. Restarted item.\n\nClosing line."]);
+        assert!(note_free(&md).contains("2. Beta item.\n\n1. [p. 2](x.pdf#page=2) Restarted"), "{md}");
+    }
+
+    #[test]
+    fn only_a_lowercase_paragraph_continues_an_open_block() {
+        for next in ["Upper start of a page.", "2019 was a year.", "- bullet.", "a. lettered.", "1. numbered."] {
+            let md = ocr(&["A paragraph with no end", next]);
+            assert!(note_free(&md).starts_with("A paragraph with no end\n\n"), "{next}: {md}");
+        }
+        assert!(note_free(&ocr(&["A paragraph with no end", "lower start."])).starts_with("A paragraph with no end [p. 2]"));
+    }
+
+    #[test]
+    fn closing_quotes_and_brackets_after_final_punctuation_close_a_block() {
+        for closed in ["He said \"stop.\"", "It ended (finally.)", "Is it so?”", "Note:"] {
+            assert!(!ends_open(closed), "{closed}");
+        }
+        for open in ["It ended (see page 3)", "and then", "x,"] {
+            assert!(ends_open(open), "{open}");
+        }
+    }
+
+    #[test]
+    fn file_names_are_encoded_as_one_url_segment() {
+        assert_eq!(url_segment("report 2019.pdf"), "report%202019.pdf");
+        assert_eq!(url_segment("a(b)#c%d~e-f_g.pdf"), "a%28b%29%23c%25d~e-f_g.pdf");
+        assert_eq!(url_segment("é.pdf"), "%C3%A9.pdf");
+    }
 
     #[test]
     fn page_numbers() {
@@ -801,7 +1001,7 @@ mod tests {
         let mut lines: Vec<Line> = (0..6).map(|i| mk(i, "word word word word word word word word word word word word")).collect();
         lines.push(Line { x1: 300.0, ..mk(6, "last line of paragraph one.") });
         lines.extend((8..12).map(|i| mk(i, "second paragraph words words words words words words words")));
-        let r = render(vec![Content::Lines(Page { height: 792.0, lines })], None);
+        let r = render(vec![Content::Lines(Page { height: 792.0, lines })], None, "x.pdf");
         assert_eq!(r.markdown.split("\n\n").count(), 2, "{}", r.markdown);
     }
 }

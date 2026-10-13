@@ -107,16 +107,16 @@ fn main() {
         }
     }
 
-    let r = layout::render(contents, meta_title);
-    let out_chars = r.markdown.chars().filter(|c| !c.is_whitespace()).count();
-    if out_chars < MIN_TEXT_CHARS && text_layer_chars == 0 {
+    let file_name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let r = layout::render(contents, meta_title, &file_name);
+    if r.body_chars < MIN_TEXT_CHARS && text_layer_chars == 0 {
         skip("no readable text", "No text could be read from this PDF, even by recognizing its scanned pages.");
     }
     let title = match &r.title {
         Some(t) => js(t),
         None => "null".into(),
     };
-    let line = format!("{{\"kind\":\"derived\",\"fragments\":{{\"text\":{}}},\"facts\":{{\"title\":{}}}}}\n", js(&r.markdown), title);
+    let line = format!("{{\"kind\":\"derived\",\"fragments\":{{\"text\":{}}},\"facts\":{{\"title\":{},\"description\":{}}}}}\n", js(&r.markdown), title, js(&r.description));
     let mut so = std::io::stdout().lock();
     so.write_all(line.as_bytes()).unwrap_or_else(|_| fail("could not write stdout"));
 }
