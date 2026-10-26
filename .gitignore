@@ -7,3 +7,6 @@ vendor/*.dll
 # Added by cargo
 
 /target
+vendor/LICENSE
+vendor/licenses/
+dist/

@@ -2,6 +2,10 @@
 
 Reads one PDF and prints one JSON result; the deriver of a moss plugin that shows a folder's PDFs as web pages. Output is deterministic for the same bytes and the same binary.
 
+Install into a moss site: `scripts/install.sh <site>` copies `plugin/manifest.json`, which names this version's release archive by URL and sha256; moss downloads and unpacks it into `~/.moss/stacks/` the first time the site is built, then asks once before running it. Releases are on [GitHub](https://github.com/Symbiosis-Lab/moss-docs/releases); today there is one build, macOS on Apple silicon (`darwin-arm64`). Each archive carries moss-docs, pdfium and Tesseract with its libraries and English language data, so no Tesseract needs to be installed, and the licences of all of them in `licenses/`.
+
+Release: `scripts/build.sh`, then `python3 -I scripts/package-macos.py` (relocates Homebrew's Tesseract into the archive and checks nothing still loads from Homebrew), then `python3 -I scripts/release-manifest.py` (writes `plugin/manifest.json` with the archive's sha256); upload `dist/*.tar.gz` to the release `v<version>` and commit the manifest. For a local build instead, `scripts/install-dev.sh <site>` points a site at `target/release/`.
+
 Build: `scripts/build.sh` fetches the pinned pdfium (`vendor.toml`), builds, and places `libpdfium.dylib` beside `target/release/moss-docs`. Tests: `scripts/fetch-pdfium.sh && cargo test --release`. Fixtures are regenerated with `scripts/make-fixtures.py` (needs Pillow and pypdf).
 
 Protocol: stdin `{"path": "/abs/file.pdf"}`; stdout one line, either `{"kind":"derived","fragments":{"text":...},"facts":{"title":...,"description":"<n> pages[, scanned|, partly scanned]"}}` or `{"kind":"skip","reason":...,"message":...}`; any other failure is a non-zero exit with a one-line reason on stderr. Pdfium is found next to the executable, else `MOSS_DOCS_PDFIUM`; tesseract next to the executable, else `MOSS_DOCS_TESSERACT`, else PATH, and its absence is a failure only when a page needs OCR.
