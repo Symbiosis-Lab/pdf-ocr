@@ -581,8 +581,10 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         .map(|b| b.iter().map(|b| b.logical.as_slice()).collect())
         .unwrap_or_default();
     let whole: Vec<&[String]> = page_blocks.iter().flat_map(|b| b.iter().map(|b| b.logical.as_slice())).collect();
-    let date = front::approval_date(&whole).or_else(|| front::first_date(&first_page));
-    let mut title: Option<String> = front::subject_title(&first_page).or_else(|| front::resolution_title(&whole));
+    let subject = front::subject_title(&first_page);
+    // A letter that bundles later approvals (a preliminary and a final determination) keeps its own date.
+    let date = if subject.is_some() { None } else { front::approval_date(&whole) }.or_else(|| front::first_date(&first_page));
+    let mut title: Option<String> = subject.or_else(|| front::resolution_title(&whole));
     let mut drop_title: Option<(usize, usize)> = None;
     if let (None, Some((pi, bl))) = (&title, page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty())) {
         let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.size >= 1.2 * body && title_candidate(b)).collect();
@@ -856,6 +858,13 @@ mod tests {
         let r = render(vec![Content::Ocr(p1.into()), Content::Ocr(p2.into())], None, "067_ACS_2015.pdf");
         assert_eq!(r.title.as_deref(), Some("Second Matter"));
         assert_eq!(r.date.as_deref(), Some("2015-07-30"));
+    }
+
+    #[test]
+    fn a_letter_with_a_subject_keeps_its_date_though_it_bundles_approvals() {
+        let letter = "July 21, 2020\n\nAudit Status: Evaluation of Practices for Audit Period January 1, 2018 to December 31, 2019. Determination: PRELIMINARY\n\nApproved unanimously on April 22, 2021.";
+        let r = render(vec![Content::Ocr(letter.into())], None, "x.pdf");
+        assert_eq!(r.date.as_deref(), Some("2020-07-21"));
     }
 
     #[test]
