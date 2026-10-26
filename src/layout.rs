@@ -580,8 +580,9 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         .find(|b| !b.is_empty())
         .map(|b| b.iter().map(|b| b.logical.as_slice()).collect())
         .unwrap_or_default();
-    let date = front::first_date(&first_page);
-    let mut title: Option<String> = front::subject_title(&first_page);
+    let whole: Vec<&[String]> = page_blocks.iter().flat_map(|b| b.iter().map(|b| b.logical.as_slice())).collect();
+    let date = front::approval_date(&whole).or_else(|| front::first_date(&first_page));
+    let mut title: Option<String> = front::subject_title(&first_page).or_else(|| front::resolution_title(&whole));
     let mut drop_title: Option<(usize, usize)> = None;
     if let (None, Some((pi, bl))) = (&title, page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty())) {
         let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.size >= 1.2 * body && title_candidate(b)).collect();
@@ -846,6 +847,15 @@ mod tests {
         assert_eq!(r(Some("Real Metadata Title")).as_deref(), Some("Real Metadata Title"));
         assert_eq!(r(Some("TeamMate Report")).as_deref(), Some("521 BERS 2020 SHPRA"));
         assert_eq!(r(None).as_deref(), Some("521 BERS 2020 SHPRA"));
+    }
+
+    #[test]
+    fn a_resolution_bundle_takes_its_last_resolution_and_approval() {
+        let p1 = "Letter dated October 24, 2014 about the matter.\n\nRESOLUTION #14/067: Final Determination of the Agency's Complaint Procedures, from January 1, 2012 to December 31, 2013\n\nApproved unanimously on December 18, 2014.";
+        let p2 = "RESOLUTION #15/001: Second Matter. Details.\n\nApproved unanimously on July 30, 2015.";
+        let r = render(vec![Content::Ocr(p1.into()), Content::Ocr(p2.into())], None, "067_ACS_2015.pdf");
+        assert_eq!(r.title.as_deref(), Some("Second Matter"));
+        assert_eq!(r.date.as_deref(), Some("2015-07-30"));
     }
 
     #[test]

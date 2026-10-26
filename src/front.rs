@@ -264,6 +264,41 @@ pub fn first_date(blocks: &[&[String]]) -> Option<String> {
     })
 }
 
+const APPROVAL_FILLER: [&str; 3] = ["unanimously", "on", ":"];
+
+/// The latest date a document records as approved or adopted ("Approved
+/// unanimously on <date>", "Adopted: <date>"), as `YYYY-MM-DD`. A resolution
+/// bundle is dated by its last approval, not by letters it mentions.
+pub fn approval_date(blocks: &[&[String]]) -> Option<String> {
+    let text: Vec<&str> = blocks.iter().flat_map(|b| b.iter().map(String::as_str)).collect();
+    let toks = tokens(&text.join(" "));
+    toks.iter()
+        .enumerate()
+        .filter(|(_, t)| matches!(clean(t).to_ascii_lowercase().as_str(), "approved" | "adopted"))
+        .filter_map(|(i, _)| {
+            let window = &toks[i + 1..toks.len().min(i + 6)];
+            let d = dates(window).into_iter().next()?;
+            window[..d.start].iter().all(|t| APPROVAL_FILLER.contains(&clean(t).to_ascii_lowercase().as_str()) || t == ":").then_some(d.iso)
+        })
+        .max()
+}
+
+/// The subject of the last "RESOLUTION #<id>:" in the document, cut before a
+/// trailing ", from <date> to <date>" clause or the first sentence end.
+pub fn resolution_title(blocks: &[&[String]]) -> Option<String> {
+    let text: Vec<&str> = blocks.iter().flat_map(|b| b.iter().map(String::as_str)).collect();
+    let toks = tokens(&text.join(" "));
+    let at = (0..toks.len())
+        .rev()
+        .find(|&i| toks[i].eq_ignore_ascii_case("resolution") && toks.get(i + 1).is_some_and(|t| t.starts_with('#')))?;
+    let label_end = (at + 1..toks.len().min(at + 4)).find(|&j| toks[j].ends_with(':'))?;
+    let rest = &toks[label_end + 1..toks.len().min(label_end + 80)];
+    let cut = (0..rest.len()).find(|&k| {
+        clean(&rest[k]).eq_ignore_ascii_case("from") && rest.get(k + 1).is_some_and(|t| month_of(t).is_some() || numeric_date(t).is_some())
+    });
+    trim_subject(&rest[..cut.unwrap_or(rest.len())].join(" "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +418,46 @@ mod tests {
         for text in ["2022 Annual Report", "June 2020", "March 3", "13/45/2020", "February 30, 2020", "06/09/20", "May 5, 1850"] {
             assert_eq!(date(&[&[text]]), None, "{text}");
         }
+    }
+
+    #[test]
+    fn the_latest_approval_dates_a_document() {
+        let b: &[&[&str]] = &[&["Approved unanimously on December 18, 2014."], &["Some text dated October 24, 2014 here.", "Approved unanimously on July 30,", "2015."]];
+        assert_eq!(approval(b).as_deref(), Some("2015-07-30"));
+        for (line, want) in [("Approved on 3/4/2016", "2016-03-04"), ("Adopted on March 5, 2017", "2017-03-05"), ("ADOPTED: 5 May 2018", "2018-05-05")] {
+            assert_eq!(approval(&[&[line]]).as_deref(), Some(want), "{line}");
+        }
+    }
+
+    #[test]
+    fn no_approval_line_gives_none_and_a_mention_is_not_an_approval() {
+        assert_eq!(approval(&[&["The plan was approved by the board after March 5, 2017."]]), None);
+        assert_eq!(approval(&[&["Dear Chair, letter dated October 24, 2014."]]), None);
+    }
+
+    #[test]
+    fn a_resolution_title_is_the_last_label_joined_and_trimmed() {
+        let b: &[&[&str]] = &[
+            &["RESOLUTION #14/010: First Matter, from January 1, 2012 to", "December 31, 2013. Body text."],
+            &["RESOLUTION #14/067: Final Determination pursuant to the Audit of", "the Agency's Complaint Procedures, from January 1, 2012 to December 31, 2013 and more"],
+        ];
+        assert_eq!(restitle(b).as_deref(), Some("Final Determination pursuant to the Audit of the Agency's Complaint Procedures"));
+        assert_eq!(restitle(&[&["RESOLUTION #1: Short Matter. Then the body follows."]]).as_deref(), Some("Short Matter"));
+        let long = format!("RESOLUTION #2: {}", "Alpha Beta ".repeat(20));
+        let t = restitle(&[&[long.as_str()]]).unwrap();
+        assert!(t.chars().count() <= 101 && t.ends_with('\u{2026}'), "{t}");
+        assert_eq!(restitle(&[&["Audit Status: Letter", "A resolution was passed."]]), None);
+    }
+
+    fn approval(b: &[&[&str]]) -> Option<String> {
+        let owned = blocks(b);
+        let refs: Vec<&[String]> = owned.iter().map(Vec::as_slice).collect();
+        approval_date(&refs)
+    }
+
+    fn restitle(b: &[&[&str]]) -> Option<String> {
+        let owned = blocks(b);
+        let refs: Vec<&[String]> = owned.iter().map(Vec::as_slice).collect();
+        resolution_title(&refs)
     }
 }
