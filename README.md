@@ -1,4 +1,4 @@
-# moss-docs
+# PDF OCR
 
 Reads one PDF and prints one JSON result; the deriver of a moss plugin that shows a folder's PDFs as web pages. Output is deterministic for the same bytes and the same binary.
 
