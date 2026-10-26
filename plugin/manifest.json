@@ -1,7 +1,7 @@
 {
   "name": "moss-docs",
   "display_name": "PDF OCR",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Shows a folder's PDFs as pages: extracts each document's text, reading scanned pages by OCR.",
   "contributes": {
     "derivations": {
@@ -26,8 +26,8 @@
             {
               "kind": "download",
               "platform": "darwin-arm64",
-              "url": "https://github.com/Symbiosis-Lab/moss-docs/releases/download/v0.2.1/moss-docs-0.2.1-darwin-arm64.tar.gz",
-              "sha256": "4dfd863ee1c6c3928bd1bdd71398380592457787a7567377c2886954cd028032",
+              "url": "https://github.com/Symbiosis-Lab/moss-docs/releases/download/v0.2.2/moss-docs-0.2.2-darwin-arm64.tar.gz",
+              "sha256": "3b54ead26223c1595cc0741a93b70d8e7ec94b89d170f964ae8895f895dd9824",
               "archive_format": "tar.gz",
               "executable": "moss-docs/moss-docs"
             }
