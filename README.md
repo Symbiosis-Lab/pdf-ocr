@@ -2,7 +2,7 @@
 
 Reads one PDF and prints one JSON result; the deriver of a moss plugin that shows a folder's PDFs as web pages. Output is deterministic for the same bytes and the same binary.
 
-Releases: the plugin is built and published by moss-registry (`plugins/pdf-ocr`).
+Development continues in [moss-registry](https://github.com/Symbiosis-Lab/moss-registry/tree/main/plugins/pdf-ocr) (`plugins/pdf-ocr`), which builds the program from its source there and publishes every release from 0.2.4 on. This repository keeps the 0.2.x history and the 0.2.1–0.2.3 release archives that existing manifests download.
 
 Install into a moss site: `scripts/install.sh <site>` copies `plugin/manifest.json`, which names this version's release archive by URL and sha256; moss downloads and unpacks it into `~/.moss/stacks/` the first time the site is built, then asks once before running it. Releases are on [GitHub](https://github.com/Symbiosis-Lab/pdf-ocr/releases); today there is one build, macOS on Apple silicon (`darwin-arm64`). Each archive carries pdf-ocr, pdfium and Tesseract with its libraries and English language data, so no Tesseract needs to be installed, and the licences of all of them in `licenses/`.
 
