@@ -115,7 +115,7 @@ fn scanned_page_is_ocred() {
     let j = json(&a);
     let t = j["fragments"]["text"].as_str().unwrap();
     assert!(t.contains("building permit application"), "{t}");
-    assert!(j["facts"]["title"].is_null());
+    assert_eq!(j["facts"]["title"], "scan1");
     assert_eq!(a.stdout, run("scan1.pdf").stdout, "OCR output must be deterministic");
 }
 
@@ -188,7 +188,7 @@ fn scanned_document_has_note_markers_joins_and_description() {
     assert!(t.starts_with(NOTE_ALL), "{t}");
     assert!(t.contains("will send a letter in the [p. 2](scan2.pdf#page=2) coming weeks to say what happens next."), "{t}");
     assert!(!t.contains("page=1"));
-    assert!(facts["title"].is_null(), "neither the note nor a marker may become the title: {facts}");
+    assert_eq!(facts["title"], "scan2", "neither the note nor a marker may become the title: {facts}");
     assert_eq!(facts["description"], "2 pages, scanned");
 }
 

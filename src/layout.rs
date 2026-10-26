@@ -256,21 +256,45 @@ fn is_generic_title(t: &str) -> bool {
     LEAD.iter().any(|p| l.starts_with(p))
 }
 
-pub fn meaningful_metadata_title(t: &str) -> Option<String> {
+/// Titles that authoring tools write when the author did not.
+const DEFAULT_TITLES: [&str; 14] = [
+    "teammate report", "powerpoint presentation", "untitled", "title", "table of contents", "title of presentation",
+    "presentation", "document", "slide 1", "microsoft word", "microsoft powerpoint", "pdf", "report", "scan",
+];
+
+fn all_digits_after(l: &str, prefix: &str) -> bool {
+    l.strip_prefix(prefix).is_some_and(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// A metadata title worth showing, or None when it is a tool default or machine-made.
+pub fn meaningful_metadata_title(t: &str, file_name: &str) -> Option<String> {
     let t = t.trim();
-    let t = t.strip_prefix("Microsoft Word - ").unwrap_or(t).trim();
+    let t = t.strip_prefix("Microsoft Word - ").or_else(|| t.strip_prefix("Microsoft PowerPoint - ")).unwrap_or(t).trim();
     let l = t.to_lowercase();
-    let junk = l.ends_with(".pdf")
-        || l.ends_with(".doc")
-        || l.ends_with(".docx")
-        || l.starts_with("untitled")
-        || l.starts_with("document")
-        || l.starts_with("scan");
+    let stem = std::path::Path::new(file_name).file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let numbered = |p: &str| l.strip_prefix(p).is_some_and(|r| !r.trim().is_empty() && r.trim().chars().all(|c| c.is_ascii_digit()));
+    let junk = DEFAULT_TITLES.contains(&l.as_str())
+        || [".pdf", ".doc", ".docx", ".ppt", ".pptx"].iter().any(|e| l.ends_with(e))
+        || numbered("document")
+        || numbered("untitled")
+        || numbered("xml")
+        || numbered("scan")
+        || l.starts_with("km_c")
+        || all_digits_after(&l, "scan")
+        || (!l.is_empty() && (l == stem || l == file_name.to_lowercase()))
+        || !t.contains(char::is_whitespace);
     let n = t.chars().count();
     if junk || !(3..=150).contains(&n) || !t.chars().any(|c| c.is_alphabetic()) || t.contains('\u{FFFD}') {
         return None;
     }
     Some(t.to_string())
+}
+
+/// "521_BERS_2020_SHPRA.pdf" becomes "521 BERS 2020 SHPRA".
+fn title_from_file_name(file_name: &str) -> Option<String> {
+    let stem = std::path::Path::new(file_name).file_stem()?.to_string_lossy().into_owned();
+    let t = stem.replace(['_', '-'], " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    (!t.is_empty()).then_some(t)
 }
 
 fn mode_size(pages: &[&Page]) -> f32 {
@@ -565,7 +589,10 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         }
     }
     if title.is_none() {
-        title = meta_title.and_then(|t| meaningful_metadata_title(&t));
+        title = meta_title.and_then(|t| meaningful_metadata_title(&t, file_name));
+    }
+    if title.is_none() {
+        title = title_from_file_name(file_name);
     }
 
     // 4. flatten with page markers; a paragraph left open at the end of a page
@@ -782,5 +809,33 @@ mod tests {
         lines.extend((8..12).map(|i| mk(i, "second paragraph words words words words words words words")));
         let r = render(vec![Content::Lines(Page { height: 792.0, lines })], None, "x.pdf");
         assert_eq!(r.markdown.split("\n\n").count(), 2, "{}", r.markdown);
+    }
+
+    #[test]
+    fn tool_defaults_and_machine_names_are_not_titles() {
+        for junk in [
+            "TeamMate Report", "PowerPoint Presentation", "Untitled", "untitled 3", "Title", "Table of Contents", "TITLE OF PRESENTATION",
+            "Document1", "Microsoft Word - Document1", "KM_C368-20220127131051", "Scan0042", "XML 4", "Single", "a_b.pdf", "x.docx",
+        ] {
+            assert_eq!(meaningful_metadata_title(junk, "x.pdf"), None, "{junk}");
+        }
+        assert_eq!(meaningful_metadata_title("Budget Notes", "Budget Notes.pdf"), None);
+        assert_eq!(meaningful_metadata_title("budget-2020", "budget-2020.pdf"), None);
+    }
+
+    #[test]
+    fn real_metadata_titles_are_kept() {
+        for ok in ["Equal Employment Practices Commission 2022 Annual Report", "NYC EEPC presentation Outline"] {
+            assert_eq!(meaningful_metadata_title(ok, "x.pdf").as_deref(), Some(ok));
+        }
+        assert_eq!(meaningful_metadata_title("Microsoft Word - Annual Plan 2020", "x.pdf").as_deref(), Some("Annual Plan 2020"));
+    }
+
+    #[test]
+    fn title_falls_back_from_metadata_to_the_file_name() {
+        let r = |meta: Option<&str>| render(vec![Content::Ocr("Some scanned words here for the page.".into())], meta.map(String::from), "521_BERS_2020_SHPRA.pdf").title;
+        assert_eq!(r(Some("Real Metadata Title")).as_deref(), Some("Real Metadata Title"));
+        assert_eq!(r(Some("TeamMate Report")).as_deref(), Some("521 BERS 2020 SHPRA"));
+        assert_eq!(r(None).as_deref(), Some("521 BERS 2020 SHPRA"));
     }
 }
