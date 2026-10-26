@@ -132,4 +132,13 @@ mod tests {
     fn no_path_leaks_into_the_fingerprint() {
         assert!(!compose("v\n", &bundle("e", b"m")).contains("pdf-ocr-fp"));
     }
+
+    #[test]
+    fn fingerprint_text_is_fixed_and_names_no_program() {
+        let sha = crate::cache::sha256_hex(b"model");
+        let want = format!(
+            "tesseract 5.5.3  leptonica|langs=eng,osd|eng.traineddata={sha}|lang=eng psm=3 dpi=300 max_side=6000"
+        );
+        assert_eq!(compose("tesseract 5.5.3\n leptonica\n", &bundle("f", b"model")), want);
+    }
 }
