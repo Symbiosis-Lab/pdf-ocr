@@ -10,8 +10,14 @@ fn pdfium() -> String {
 }
 
 fn run_stdin(stdin: &str) -> Output {
+    let cache = tempfile::tempdir().unwrap();
+    run_stdin_cached(stdin, cache.path())
+}
+
+fn run_stdin_cached(stdin: &str, cache: &std::path::Path) -> Output {
     let mut c = Command::new(env!("CARGO_BIN_EXE_moss-docs"))
         .env("MOSS_DOCS_PDFIUM", pdfium())
+        .env("MOSS_DOCS_CACHE", cache)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -226,33 +232,49 @@ fn page_without_text_still_gets_its_marker() {
     assert_eq!(facts["description"], "3 pages");
 }
 
+fn cached_run(name: &str, cache: &std::path::Path) -> String {
+    let o = run_stdin_cached(&format!("{{\"path\":{}}}", serde_json::to_string(&fixture(name)).unwrap()), cache);
+    assert!(o.status.success(), "stderr: {}", String::from_utf8_lossy(&o.stderr));
+    String::from_utf8(o.stdout).unwrap()
+}
+
+fn entries(cache: &std::path::Path) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(cache).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect()
+}
+
 #[test]
-fn ocr_cache_is_read_back_and_off_by_default() {
-    if !have_tesseract() {
-        return;
-    }
+fn extraction_cache_is_read_back_and_never_changes_the_output() {
     let cache = tempfile::tempdir().unwrap();
-    let go = |cache: Option<&std::path::Path>| {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_moss-docs"));
-        c.env("MOSS_DOCS_PDFIUM", pdfium()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        c.env_remove("MOSS_DOCS_OCR_CACHE");
-        if let Some(d) = cache {
-            c.env("MOSS_DOCS_OCR_CACHE", d);
-        }
-        let mut ch = c.spawn().unwrap();
-        ch.stdin.take().unwrap().write_all(format!("{{\"path\":{}}}", serde_json::to_string(&fixture("scan1.pdf")).unwrap()).as_bytes()).unwrap();
-        String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap()
-    };
-    let plain = go(None);
-    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 0);
-    let first = go(Some(cache.path()));
-    assert_eq!(first, plain, "caching must not change the output");
-    let files: Vec<_> = std::fs::read_dir(cache.path()).unwrap().map(|e| e.unwrap().path()).collect();
+    let cold = cached_run("text3.pdf", cache.path());
+    let files = entries(cache.path());
     assert_eq!(files.len(), 1);
-    let name = files[0].file_name().unwrap().to_str().unwrap().to_string();
-    assert_eq!(name.len(), 64 + ".txt".len(), "{name}");
-    assert_eq!(go(Some(cache.path())), plain);
-    // the entry is what the next run reads
-    std::fs::write(&files[0], "Words that only the cache holds, long enough to count as text.\n").unwrap();
-    assert!(go(Some(cache.path())).contains("Words that only the cache holds"));
+    assert_eq!(files[0].file_name().unwrap().to_str().unwrap().len(), 64 + ".json".len());
+    assert_eq!(cached_run("text3.pdf", cache.path()), cold);
+    // the entry is what the next run reads: plant a title only the cache holds
+    let mut e: Value = serde_json::from_slice(&std::fs::read(&files[0]).unwrap()).unwrap();
+    e["pages"] = serde_json::json!([{ "ocr": "Words that only the cache holds, long enough to count as text.\n" }]);
+    std::fs::write(&files[0], e.to_string()).unwrap();
+    assert!(cached_run("text3.pdf", cache.path()).contains("Words that only the cache holds"));
+    // another PDF is a different key
+    cached_run("para_break.pdf", cache.path());
+    assert_eq!(entries(cache.path()).len(), 2);
+}
+
+#[test]
+fn corrupt_extraction_entry_is_read_again_and_rewritten() {
+    let cache = tempfile::tempdir().unwrap();
+    let cold = cached_run("text3.pdf", cache.path());
+    let file = entries(cache.path()).remove(0);
+    std::fs::write(&file, "{ not json").unwrap();
+    assert_eq!(cached_run("text3.pdf", cache.path()), cold);
+    assert!(serde_json::from_slice::<Value>(&std::fs::read(&file).unwrap()).is_ok());
+}
+
+#[test]
+fn unusable_cache_location_does_not_fail_the_derivation() {
+    let d = tempfile::tempdir().unwrap();
+    let blocker = d.path().join("file");
+    std::fs::write(&blocker, "x").unwrap();
+    let cold = cached_run("text3.pdf", d.path());
+    assert_eq!(cached_run("text3.pdf", &blocker.join("sub")), cold);
 }

@@ -1,3 +1,4 @@
+mod cache;
 mod extract;
 mod front;
 mod layout;
@@ -6,7 +7,7 @@ mod ocr;
 use layout::Content;
 use pdfium_render::prelude::*;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MIN_TEXT_CHARS: usize = 20;
 
@@ -35,25 +36,16 @@ fn pdfium_path() -> Option<PathBuf> {
     std::env::var_os("MOSS_DOCS_PDFIUM").map(PathBuf::from).filter(|p| p.is_file())
 }
 
-fn main() {
-    if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("moss-docs {}", env!("CARGO_PKG_VERSION"));
-        return;
-    }
-    std::panic::set_hook(Box::new(|i| {
-        let m = i.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| i.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
-        eprintln!("moss-docs: internal error: {}", m.lines().next().unwrap_or(""));
-    }));
-    let mut input = String::new();
-    if std::io::stdin().read_to_string(&mut input).is_err() {
-        fail("could not read stdin");
-    }
-    let req: serde_json::Value = serde_json::from_str(&input).unwrap_or_else(|_| fail("stdin is not valid JSON"));
-    let path = req.get("path").and_then(|p| p.as_str()).unwrap_or_else(|| fail("missing \"path\" in request"));
-    let bytes = std::fs::read(path).unwrap_or_else(|e| fail(&format!("cannot read input file: {e}")));
+/// What besides the PDF decides the extraction: the engines and the OCR-or-text threshold.
+fn fingerprint(lib: Option<&Path>) -> String {
+    let pdfium = lib.and_then(|l| std::fs::read(l).ok()).map_or("none".into(), |b| cache::sha256_hex(&b));
+    format!("pdfium={pdfium}\n{}\nmin_text_chars={MIN_TEXT_CHARS}", ocr::fingerprint())
+}
 
-    let lib = pdfium_path().unwrap_or_else(|| fail("libpdfium not found next to the executable or in MOSS_DOCS_PDFIUM"));
-    let bindings = Pdfium::bind_to_library(&lib).unwrap_or_else(|e| fail(&format!("cannot load pdfium: {e}")));
+/// The expensive stage: the text layer of each page, or Tesseract's reading where it has none.
+fn read_pdf(lib: Option<&Path>, bytes: &[u8]) -> cache::Extraction {
+    let lib = lib.unwrap_or_else(|| fail("libpdfium not found next to the executable or in MOSS_DOCS_PDFIUM"));
+    let bindings = Pdfium::bind_to_library(lib).unwrap_or_else(|e| fail(&format!("cannot load pdfium: {e}")));
     let pdfium = Pdfium::new(bindings);
 
     let doc = match pdfium.load_pdf_from_byte_slice(&bytes, None) {
@@ -107,6 +99,39 @@ fn main() {
             Err(e) => fail(&e),
         }
     }
+    cache::Extraction { meta_title, text_layer_chars, contents }
+}
+
+fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("moss-docs {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    std::panic::set_hook(Box::new(|i| {
+        let m = i.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| i.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+        eprintln!("moss-docs: internal error: {}", m.lines().next().unwrap_or(""));
+    }));
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        fail("could not read stdin");
+    }
+    let req: serde_json::Value = serde_json::from_str(&input).unwrap_or_else(|_| fail("stdin is not valid JSON"));
+    let path = req.get("path").and_then(|p| p.as_str()).unwrap_or_else(|| fail("missing \"path\" in request"));
+    let bytes = std::fs::read(path).unwrap_or_else(|e| fail(&format!("cannot read input file: {e}")));
+
+    let lib = pdfium_path();
+    let fingerprint = fingerprint(lib.as_deref());
+    let key = cache::key(&bytes, &fingerprint);
+    let dir = cache::default_dir();
+    let cached = dir.as_deref().and_then(|d| cache::get(d, &key));
+    let ex = cached.unwrap_or_else(|| {
+        let ex = read_pdf(lib.as_deref(), &bytes);
+        if let Some(d) = &dir {
+            let _ = cache::put(d, &key, &ex, cache::DEFAULT_CAP);
+        }
+        ex
+    });
+    let cache::Extraction { meta_title, text_layer_chars, contents } = ex;
 
     let file_name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let r = layout::render(contents, meta_title, &file_name);
