@@ -5,7 +5,7 @@
 set -eu
 site="${1:?usage: install.sh <site folder>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
-dest="$site/.moss/plugins/moss-docs"
+dest="$site/.moss/plugins/pdf-ocr"
 mkdir -p "$dest"
 cp "$root/plugin/manifest.json" "$dest/manifest.json"
-echo "installed moss-docs $(sed -n 's/.*"version": "\(.*\)".*/\1/p' "$root/plugin/manifest.json" | head -1) into $dest"
+echo "installed pdf-ocr $(sed -n 's/.*"version": "\(.*\)".*/\1/p' "$root/plugin/manifest.json" | head -1) into $dest"

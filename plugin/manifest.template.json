@@ -10,7 +10,7 @@
         "noun": { "one": "PDF", "other": "PDFs" },
         "fragments": { "text": "markdown" },
         "stub": ["#text", ""],
-        "run": { "binary": "moss-docs", "artifact": [ ARTIFACT ] }
+        "run": { "binary": "pdf-ocr", "artifact": [ ARTIFACT ] }
       }
     }
   }

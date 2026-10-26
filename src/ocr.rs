@@ -12,7 +12,7 @@ pub fn find_tesseract() -> Option<PathBuf> {
             return Some(c);
         }
     }
-    if let Ok(p) = std::env::var("MOSS_DOCS_TESSERACT") {
+    if let Ok(p) = std::env::var("PDF_OCR_TESSERACT") {
         if Path::new(&p).is_file() {
             return Some(PathBuf::from(p));
         }
@@ -109,7 +109,7 @@ mod tests {
     use super::compose;
 
     fn bundle(tag: &str, traineddata: &[u8]) -> String {
-        let dir = std::env::temp_dir().join(format!("moss-docs-fp-{}-{tag}", std::process::id())).join("bundle/tessdata");
+        let dir = std::env::temp_dir().join(format!("pdf-ocr-fp-{}-{tag}", std::process::id())).join("bundle/tessdata");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("eng.traineddata"), traineddata).unwrap();
         format!("List of available languages in \"{}/\" (2):\neng\nosd\n", dir.display())
@@ -130,6 +130,6 @@ mod tests {
 
     #[test]
     fn no_path_leaks_into_the_fingerprint() {
-        assert!(!compose("v\n", &bundle("e", b"m")).contains("moss-docs-fp"));
+        assert!(!compose("v\n", &bundle("e", b"m")).contains("pdf-ocr-fp"));
     }
 }

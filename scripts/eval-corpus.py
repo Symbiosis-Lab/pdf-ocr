@@ -4,7 +4,7 @@ import sys, os, json, subprocess, time, glob
 pdfdir, out = sys.argv[1], sys.argv[2]
 budget = float(sys.argv[3]) if len(sys.argv) > 3 else 500
 os.makedirs(out, exist_ok=True)
-binp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "release", "moss-docs")
+binp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "release", "pdf-ocr")
 from pypdf import PdfReader
 t0 = time.time()
 log = os.path.join(out, "results.jsonl")

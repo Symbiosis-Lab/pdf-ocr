@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Package the release for macOS: moss-docs, libpdfium, and a relocated Tesseract
+"""Package the release for macOS: pdf-ocr, libpdfium, and a relocated Tesseract
 with its libraries and English language data, as one tar.gz a moss plugin can
 download. Needs Homebrew's tesseract (its build and data are what is shipped)
 and a release build (scripts/build.sh).
 
-    python3 -I scripts/package-macos.py            # writes dist/moss-docs-<version>-darwin-arm64.tar.gz
+    python3 -I scripts/package-macos.py            # writes dist/pdf-ocr-<version>-darwin-arm64.tar.gz
 
 The bundle is self-contained: every library Tesseract loads from Homebrew is
 copied beside it and its load commands rewritten to @executable_path/@loader_path,
@@ -29,17 +29,17 @@ def main():
     if platform.machine() != 'arm64':
         sys.exit('build on Apple silicon: the bundle is darwin-arm64')
     version = re.search(r'^version = "([^"]+)"', (ROOT / 'Cargo.toml').read_text(), re.M).group(1)
-    exe = ROOT / 'target/release/moss-docs'
+    exe = ROOT / 'target/release/pdf-ocr'
     if not exe.is_file() or not (ROOT / 'target/release/libpdfium.dylib').is_file():
         sys.exit('run scripts/build.sh first')
     tess = pathlib.Path(os.path.realpath(BREW / 'bin/tesseract'))
 
-    out = ROOT / 'dist' / f'moss-docs-{version}-darwin-arm64'
+    out = ROOT / 'dist' / f'pdf-ocr-{version}-darwin-arm64'
     shutil.rmtree(out, ignore_errors=True)
     (out / 'lib').mkdir(parents=True)
     (out / 'tessdata').mkdir()
     (out / 'licenses').mkdir()
-    shutil.copy(exe, out / 'moss-docs')
+    shutil.copy(exe, out / 'pdf-ocr')
     shutil.copy(ROOT / 'target/release/libpdfium.dylib', out / 'libpdfium.dylib')
     shutil.copy(tess, out / 'tesseract')
     shutil.copy(os.path.realpath(BREW / 'share/tessdata/eng.traineddata'), out / 'tessdata/eng.traineddata')
@@ -91,7 +91,7 @@ def main():
         for f in (BREW / 'Cellar' / formula).glob('*/*'):
             if re.match(r'(LICEN[CS]E|COPYING|NOTICE)', f.name, re.I) and f.is_file():
                 shutil.copy(f, out / 'licenses' / f'{formula}-{f.name}')
-    shutil.copy(ROOT / 'LICENSE', out / 'licenses' / 'moss-docs-LICENSE')
+    shutil.copy(ROOT / 'LICENSE', out / 'licenses' / 'pdf-ocr-LICENSE')
     # licences Homebrew does not keep (leptonica), copied once from upstream at the shipped version
     for f in (ROOT / 'licenses').iterdir():
         shutil.copy(f, out / 'licenses' / f.name)
@@ -102,7 +102,7 @@ def main():
         info.uname = info.gname = ''
         return info
     with tarfile.open(tgz, 'w:gz') as t:
-        t.add(out, arcname='moss-docs', filter=anonymous)
+        t.add(out, arcname='pdf-ocr', filter=anonymous)
     digest = hashlib.sha256(tgz.read_bytes()).hexdigest()
     print(f'{tgz}\nsha256 {digest}\n{len(libs)} libraries, tesseract {run(str(out / "tesseract"), "--version").splitlines()[0]}')
 

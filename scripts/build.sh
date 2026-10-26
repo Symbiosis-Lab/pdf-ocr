@@ -5,4 +5,4 @@ cd "$(dirname "$0")/.."
 ./scripts/fetch-pdfium.sh
 cargo build --release
 cp vendor/libpdfium.dylib target/release/libpdfium.dylib
-echo "built: $(pwd)/target/release/moss-docs"
+echo "built: $(pwd)/target/release/pdf-ocr"

@@ -28,7 +28,7 @@ pub fn key(pdf: &[u8], fingerprint: &str) -> String {
 }
 
 /// `$MOSS_CACHE_DIR/extract` (the directory moss gives a plugin, when it can be
-/// written), else `$MOSS_DOCS_CACHE`, else the platform cache directory. None
+/// written), else `$PDF_OCR_CACHE`, else the platform cache directory. None
 /// when no home is known.
 pub fn default_dir() -> Option<PathBuf> {
     dir_from(|k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from))
@@ -40,7 +40,7 @@ fn dir_from(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
             return Some(dir);
         }
     }
-    if let Some(d) = var("MOSS_DOCS_CACHE") {
+    if let Some(d) = var("PDF_OCR_CACHE") {
         return Some(d);
     }
     let base = if cfg!(target_os = "macos") {
@@ -48,7 +48,7 @@ fn dir_from(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     } else {
         var("XDG_CACHE_HOME").or_else(|| var("HOME").map(|h| h.join(".cache")))?
     };
-    Some(base.join("moss-docs/extract"))
+    Some(base.join("pdf-ocr/extract"))
 }
 
 fn entry_path(dir: &Path, key: &str) -> PathBuf {
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn location_prefers_the_moss_cache_dir_then_the_docs_override_then_the_home_default() {
-        let tmp = std::env::temp_dir().join(format!("moss-docs-dir-order-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("pdf-ocr-dir-order-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
         let blocked = tmp.join("a-file");
         std::fs::write(&blocked, "x").unwrap();
@@ -221,13 +221,13 @@ mod tests {
             move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
         }
         let moss = ("MOSS_CACHE_DIR", tmp.join("moss"));
-        let docs = ("MOSS_DOCS_CACHE", PathBuf::from("/docs"));
+        let docs = ("PDF_OCR_CACHE", PathBuf::from("/docs"));
         let home = ("HOME", PathBuf::from("/home/u"));
         assert_eq!(dir_from(env(&[moss.clone(), docs.clone(), home.clone()])), Some(tmp.join("moss/extract")));
         assert_eq!(dir_from(env(&[docs.clone(), home.clone()])), Some(PathBuf::from("/docs")));
         let unwritable = ("MOSS_CACHE_DIR", blocked);
         assert_eq!(dir_from(env(&[unwritable, docs, home.clone()])), Some(PathBuf::from("/docs")));
-        assert!(dir_from(env(&[home])).unwrap().ends_with("moss-docs/extract"));
+        assert!(dir_from(env(&[home])).unwrap().ends_with("pdf-ocr/extract"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

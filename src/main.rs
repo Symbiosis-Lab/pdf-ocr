@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const MIN_TEXT_CHARS: usize = 20;
 
 fn fail(msg: &str) -> ! {
-    eprintln!("moss-docs: {msg}");
+    eprintln!("pdf-ocr: {msg}");
     std::process::exit(1);
 }
 
@@ -33,7 +33,7 @@ fn pdfium_path() -> Option<PathBuf> {
             return Some(c);
         }
     }
-    std::env::var_os("MOSS_DOCS_PDFIUM").map(PathBuf::from).filter(|p| p.is_file())
+    std::env::var_os("PDF_OCR_PDFIUM").map(PathBuf::from).filter(|p| p.is_file())
 }
 
 /// What besides the PDF decides the extraction: the engines and the OCR-or-text threshold.
@@ -44,7 +44,7 @@ fn fingerprint(lib: Option<&Path>) -> String {
 
 /// The expensive stage: the text layer of each page, or Tesseract's reading where it has none.
 fn read_pdf(lib: Option<&Path>, bytes: &[u8]) -> cache::Extraction {
-    let lib = lib.unwrap_or_else(|| fail("libpdfium not found next to the executable or in MOSS_DOCS_PDFIUM"));
+    let lib = lib.unwrap_or_else(|| fail("libpdfium not found next to the executable or in PDF_OCR_PDFIUM"));
     let bindings = Pdfium::bind_to_library(lib).unwrap_or_else(|e| fail(&format!("cannot load pdfium: {e}")));
     let pdfium = Pdfium::new(bindings);
 
@@ -104,12 +104,12 @@ fn read_pdf(lib: Option<&Path>, bytes: &[u8]) -> cache::Extraction {
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--version") {
-        println!("moss-docs {}", env!("CARGO_PKG_VERSION"));
+        println!("pdf-ocr {}", env!("CARGO_PKG_VERSION"));
         return;
     }
     std::panic::set_hook(Box::new(|i| {
         let m = i.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| i.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
-        eprintln!("moss-docs: internal error: {}", m.lines().next().unwrap_or(""));
+        eprintln!("pdf-ocr: internal error: {}", m.lines().next().unwrap_or(""));
     }));
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {

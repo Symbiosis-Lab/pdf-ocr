@@ -15,9 +15,9 @@ fn run_stdin(stdin: &str) -> Output {
 }
 
 fn run_stdin_cached(stdin: &str, cache: &std::path::Path) -> Output {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_moss-docs"))
-        .env("MOSS_DOCS_PDFIUM", pdfium())
-        .env("MOSS_DOCS_CACHE", cache)
+    let mut c = Command::new(env!("CARGO_BIN_EXE_pdf-ocr"))
+        .env("PDF_OCR_PDFIUM", pdfium())
+        .env("PDF_OCR_CACHE", cache)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -44,9 +44,9 @@ fn json(o: &Output) -> Value {
 
 #[test]
 fn version() {
-    let o = Command::new(env!("CARGO_BIN_EXE_moss-docs")).arg("--version").output().unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_pdf-ocr")).arg("--version").output().unwrap();
     assert!(o.status.success());
-    assert_eq!(String::from_utf8_lossy(&o.stdout), format!("moss-docs {}\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), format!("pdf-ocr {}\n", env!("CARGO_PKG_VERSION")));
 }
 
 #[test]

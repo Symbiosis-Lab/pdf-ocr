@@ -4,10 +4,10 @@
 set -eu
 site="${1:?usage: install-dev.sh <site folder>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
-bin="$root/target/release/moss-docs"
+bin="$root/target/release/pdf-ocr"
 [ -x "$bin" ] || { echo "build first: scripts/build.sh" >&2; exit 1; }
-dest="$site/.moss/plugins/moss-docs"
+dest="$site/.moss/plugins/pdf-ocr"
 mkdir -p "$dest"
 artifact="{ \"kind\": \"path\", \"binary\": \"$bin\" }"
 sed "s|ARTIFACT|$artifact|" "$root/plugin/manifest.template.json" > "$dest/manifest.json"
-echo "installed moss-docs into $dest"
+echo "installed pdf-ocr into $dest"

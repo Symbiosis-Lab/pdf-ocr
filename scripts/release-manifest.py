@@ -8,17 +8,17 @@ its platform into ~/.moss/stacks on first use.
 import hashlib, json, pathlib, re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-REPO = 'https://github.com/Symbiosis-Lab/moss-docs'
+REPO = 'https://github.com/Symbiosis-Lab/pdf-ocr'
 version = re.search(r'^version = "([^"]+)"', (ROOT / 'Cargo.toml').read_text(), re.M).group(1)
 artifacts = []
-for tgz in sorted((ROOT / 'dist').glob(f'moss-docs-{version}-*.tar.gz')):
-    platform = tgz.name.removeprefix(f'moss-docs-{version}-').removesuffix('.tar.gz')
+for tgz in sorted((ROOT / 'dist').glob(f'pdf-ocr-{version}-*.tar.gz')):
+    platform = tgz.name.removeprefix(f'pdf-ocr-{version}-').removesuffix('.tar.gz')
     artifacts.append({'kind': 'download', 'platform': platform,
                       'url': f'{REPO}/releases/download/v{version}/{tgz.name}',
                       'sha256': hashlib.sha256(tgz.read_bytes()).hexdigest(),
-                      'archive_format': 'tar.gz', 'executable': 'moss-docs/moss-docs'})
+                      'archive_format': 'tar.gz', 'executable': 'pdf-ocr/pdf-ocr'})
 if not artifacts:
-    raise SystemExit(f'no dist/moss-docs-{version}-*.tar.gz: run scripts/package-macos.py')
+    raise SystemExit(f'no dist/pdf-ocr-{version}-*.tar.gz: run scripts/package-macos.py')
 template = (ROOT / 'plugin/manifest.template.json').read_text()
 manifest = json.loads(template.replace('ARTIFACT', '{}'))
 manifest['version'] = version
