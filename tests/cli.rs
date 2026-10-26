@@ -51,18 +51,15 @@ fn text_pdf_markdown() {
     assert!(raw.trim_end().ends_with("\"facts\":{\"title\":\"Audit of Example Program Controls\",\"description\":\"3 pages\"}}"));
     let j = json(&o);
     let t = j["fragments"]["text"].as_str().unwrap();
-    // headings: start at ##, title is not repeated
-    assert!(t.contains("\n### Corrective Action Plan\n") || t.contains("## Corrective Action Plan"));
-    assert!(t.starts_with("## ") || t.starts_with("### "));
+    // plain text: no heading syntax, the title is not repeated
+    assert!(t.contains("[p. 2](text3.pdf#page=2) Corrective Action Plan\n\n"), "{t}");
+    assert!(!t.lines().any(|l| l.starts_with('#')));
     assert!(!t.contains("Audit of Example Program Controls"));
-    // sentence-length lines are never headings
-    assert!(!t.lines().any(|l| l.starts_with('#') && l.len() > 100));
     // wrapped lines joined, hyphenation repaired
     assert!(t.contains("responsibility for approvals"));
-    // lists preserved
-    assert!(t.contains("1. Assign a single office"));
-    assert!(t.contains("3. Train staff"));
-    assert!(t.contains("- Several files lacked"));
+    // list items are plain paragraph text, their markers escaped
+    assert!(t.contains("Assign a single office"));
+    assert!(!t.lines().any(|l| l.starts_with("- ") || l.starts_with("1. ")), "{t}");
     // numbered items "Corrective Action #N" stay in the text
     assert!(t.contains("Corrective Action #1:") && t.contains("Corrective Action #2:"));
     // running header/footer and page numbers stripped
@@ -132,8 +129,7 @@ fn side_column_comes_after_the_main_column() {
     assert!(!t.lines().any(|l| l.contains("Jane Roe") && l.contains("March")), "{t}");
     assert!(pos("March 3, 2021") < pos("Jane Roe"));
     assert!(pos("Purpose") < pos("Jane Roe"));
-    // a body-font title above a paragraph becomes a heading
-    assert!(t.contains("## Purpose") || t.contains("### Purpose"), "{t}");
+    assert!(t.contains("\n\nPurpose\n\n"), "{t}");
 }
 
 fn text_of(name: &str) -> (String, Value) {
@@ -144,10 +140,9 @@ fn text_of(name: &str) -> (String, Value) {
 const NOTE_ALL: &str = "> [!note]\n> This text was read by machine from a scan and can contain errors. The PDF is the document of record; a page number opens it at that page.\n\n";
 
 #[test]
-fn page_markers_precede_headings_and_open_paragraphs() {
+fn page_markers_open_the_paragraph_that_starts_a_page() {
     let (t, facts) = text_of("heading3.pdf");
-    // page 2 begins with a heading: the marker is its own paragraph just before it
-    assert!(t.contains("records.\n\n[p. 2](heading3.pdf#page=2)\n\n## Findings\n\n"), "{t}");
+    assert!(t.contains("records.\n\n[p. 2](heading3.pdf#page=2) Findings\n\n"), "{t}");
     // page 3 begins with a paragraph: the marker is the first thing in it
     assert!(t.contains("\n\n[p. 3](heading3.pdf#page=3) Recommendations follow"), "{t}");
     assert!(!t.contains("page=1"), "page 1 gets no marker:\n{t}");
@@ -179,7 +174,7 @@ fn file_name_is_percent_encoded_in_markers() {
     std::fs::copy(fixture("heading3.pdf"), &dst).unwrap();
     let j = json(&run_stdin(&format!("{{\"path\":{}}}", serde_json::to_string(dst.to_str().unwrap()).unwrap())));
     let t = j["fragments"]["text"].as_str().unwrap();
-    assert!(t.contains("\n\n[p. 2](rapport%20%28%C3%A9%29%202019.pdf#page=2)\n\n## Findings"), "{t}");
+    assert!(t.contains("\n\n[p. 2](rapport%20%28%C3%A9%29%202019.pdf#page=2) Findings"), "{t}");
     assert!(t.contains("[p. 3](rapport%20%28%C3%A9%29%202019.pdf#page=3) Recommendations"), "{t}");
 }
 

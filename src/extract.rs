@@ -137,15 +137,11 @@ fn rows_to_lines(mut segs: Vec<Seg>, col: u8) -> Vec<Line> {
         let (size, base) = (big.size, big.base);
         let bold = r.iter().filter(|s| s.bold).map(|s| s.n).sum::<usize>() * 2 > total;
         let mut text = String::new();
-        let mut tabular = false;
         let mut px1: Option<f32> = None;
         for s in &r {
             if let Some(p) = px1 {
                 let gap = s.x0 - p;
-                if gap > 2.5 * size {
-                    tabular = true;
-                    text.push('\u{2003}');
-                } else if gap > 0.15 * size || !text.is_empty() {
+                if gap > 0.15 * size || !text.is_empty() {
                     text.push(' ');
                 }
             }
@@ -161,7 +157,7 @@ fn rows_to_lines(mut segs: Vec<Seg>, col: u8) -> Vec<Line> {
         if text.is_empty() {
             continue;
         }
-        lines.push(Line { col, x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text, tabular });
+        lines.push(Line { col, x0: r[0].x0, x1: r.last().unwrap().x1, base, size, bold, text });
     }
     lines
 }

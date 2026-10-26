@@ -11,8 +11,6 @@ pub struct Line {
     pub size: f32,
     pub bold: bool,
     pub text: String,
-    /// The row has wide internal gaps (table-like): keep it on its own line.
-    pub tabular: bool,
     /// Reading-order column group on the page (0 for single-column pages).
     pub col: u8,
 }
@@ -22,29 +20,11 @@ pub struct Page {
     pub lines: Vec<Line>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Item {
-    Bullet,
-    Numbered,
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Kind {
-    Para,
-    Item(Item),
-    Heading,
-}
-
 #[derive(Debug, Clone)]
 struct Blk {
-    kind: Kind,
     logical: Vec<String>,
     size: f32,
-    bold: bool,
     ends_open: bool,
-    /// Made of table-like rows: never joined across a page break.
-    tabular: bool,
 }
 
 pub struct Rendered {
@@ -111,95 +91,24 @@ fn norm_key(s: &str) -> String {
     out
 }
 
-fn list_marker(s: &str) -> Option<(Item, usize)> {
-    let mut it = s.char_indices();
-    let (_, c0) = it.next()?;
-    let after = |n: usize| -> Option<usize> {
-        // marker must be followed by whitespace (consumed) and more text
-        let rest = &s[n..];
-        let t = rest.trim_start();
-        if t.is_empty() || t.len() == rest.len() {
-            return None;
-        }
-        Some(s.len() - t.len())
-    };
-    if "•◦▪●■○‣►➢✓".contains(c0) || ('\u{F000}'..='\u{F0FF}').contains(&c0) {
-        return after(c0.len_utf8()).map(|n| (Item::Bullet, n)).or_else(|| {
-            // glyph followed directly by text
-            let rest = &s[c0.len_utf8()..];
-            (!rest.is_empty()).then_some((Item::Bullet, c0.len_utf8()))
-        });
-    }
-    if matches!(c0, '-' | '–' | '—' | '*' | '·') {
-        return after(c0.len_utf8()).map(|n| (Item::Bullet, n));
-    }
-    if c0.is_ascii_digit() {
-        let nd = s.chars().take_while(|c| c.is_ascii_digit()).count();
-        if nd <= 3 {
-            let rest = &s[nd..];
-            if rest.starts_with('.') || rest.starts_with(')') {
-                return after(nd + 1).map(|n| (Item::Numbered, n));
-            }
-        }
-        return None;
-    }
-    if c0.is_ascii_uppercase() {
-        let n = s.chars().take_while(|c| "IVXLC".contains(*c)).count();
-        if (1..=5).contains(&n) && s[n..].starts_with(". ") && s[n + 2..].chars().next().is_some_and(|c| c.is_uppercase()) {
-            return after(n + 1).map(|m| (Item::Other, m));
-        }
-    }
-    if c0.is_ascii_alphabetic() {
-        let rest = &s[1..];
-        if (rest.starts_with('.') && c0.is_ascii_lowercase()) || rest.starts_with(')') {
-            return after(2).map(|n| (Item::Other, n));
-        }
-        return None;
-    }
-    if c0 == '(' {
-        if let Some(close) = s.find(')') {
-            let inner = &s[1..close];
-            if !inner.is_empty()
-                && inner.len() <= 4
-                && (inner.chars().all(|c| c.is_ascii_digit())
-                    || inner.chars().all(|c| "ivxlcdm".contains(c))
-                    || (inner.len() == 1 && inner.chars().all(|c| c.is_ascii_alphabetic())))
-            {
-                return after(close + 1).map(|n| (Item::Other, n));
-            }
-        }
-    }
-    None
-}
-
-/// Escape characters that would change meaning in markdown.
+/// Backslash-escape what would read as inline markdown, so the text renders as itself.
 pub fn escape_inline(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + 4);
     for (i, &c) in chars.iter().enumerate() {
         let prev = if i > 0 { Some(chars[i - 1]) } else { None };
         let next = chars.get(i + 1).copied();
-        match c {
-            '*' | '`' => {
-                out.push('\\');
-                out.push(c)
-            }
-            '_' => {
-                let inner = prev.is_some_and(|p| p.is_alphanumeric()) && next.is_some_and(|n| n.is_alphanumeric());
-                if !inner {
-                    out.push('\\');
-                }
-                out.push(c)
-            }
-            '[' if next == Some('[') || prev == Some('[') => {
-                out.push('\\');
-                out.push(c)
-            }
-            '<' if next.is_some_and(|n| n.is_ascii_alphabetic() || n == '/' || n == '!' || n == '?') => {
-                out.push_str("\\<")
-            }
-            _ => out.push(c),
+        let escape = match c {
+            '\\' | '*' | '`' | '[' | ']' | '|' | '~' => true,
+            '_' => !(prev.is_some_and(|p| p.is_alphanumeric()) && next.is_some_and(|n| n.is_alphanumeric())),
+            '<' => next.is_some_and(|n| n.is_ascii_alphabetic() || n == '/' || n == '!' || n == '?'),
+            '&' => next.is_some_and(|n| n.is_ascii_alphanumeric() || n == '#'),
+            _ => false,
+        };
+        if escape {
+            out.push('\\');
         }
+        out.push(c);
     }
     out
 }
@@ -209,7 +118,7 @@ fn escape_line_start(s: &str) -> String {
     let t = s.trim_start();
     let first = t.chars().next();
     match first {
-        Some('#') | Some('>') | Some('+') | Some('-') | Some('=') | Some('|') => format!("\\{t}"),
+        Some('#') | Some('>') | Some('+') | Some('-') | Some('=') => format!("\\{t}"),
         Some(c) if c.is_ascii_digit() => {
             let nd = t.chars().take_while(|c| c.is_ascii_digit()).count();
             let rest = &t[nd..];
@@ -299,34 +208,22 @@ fn strip_ocr_running(pages: &mut [&mut String]) {
 fn ocr_blocks(text: &str, vocab: &Vocab) -> Vec<Blk> {
     let mut blocks: Vec<Blk> = Vec::new();
     for para in text.replace(MARK, "").split("\n\n") {
-        let mut cur: Vec<String> = Vec::new();
-        for raw in para.lines() {
-            let l = raw.trim();
-            if l.is_empty() {
-                continue;
-            }
-            if cur.is_empty() || list_marker(l).is_some() {
-                cur.push(l.to_string());
-            } else {
-                join_wrapped(cur.last_mut().unwrap(), l, vocab);
-            }
+        let mut text = String::new();
+        for l in para.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            join_wrapped(&mut text, l, vocab);
         }
-        for s in cur {
-            let (kind, text) = match list_marker(&s) {
-                Some((Item::Bullet, n)) => (Kind::Item(Item::Bullet), s[n..].to_string()),
-                Some((it, _)) => (Kind::Item(it), s),
-                None => (Kind::Para, s),
-            };
-            let open = ends_open(&text);
-            // Tesseract sets a short last line apart as its own paragraph.
-            let widow = kind == Kind::Para && text.chars().next().is_some_and(|c| c.is_lowercase());
-            match blocks.last_mut() {
-                Some(prev) if widow && prev.ends_open => {
-                    join_wrapped(prev.logical.last_mut().unwrap(), &text, vocab);
-                    prev.ends_open = open;
-                }
-                _ => blocks.push(Blk { kind, logical: vec![text], size: 0.0, bold: false, ends_open: open, tabular: false }),
+        if text.is_empty() {
+            continue;
+        }
+        let open = ends_open(&text);
+        // Tesseract sets a short last line apart as its own paragraph.
+        let widow = text.chars().next().is_some_and(|c| c.is_lowercase());
+        match blocks.last_mut() {
+            Some(prev) if widow && prev.ends_open => {
+                join_wrapped(prev.logical.last_mut().unwrap(), &text, vocab);
+                prev.ends_open = open;
             }
+            _ => blocks.push(Blk { logical: vec![text], size: 0.0, ends_open: open }),
         }
     }
     blocks
@@ -469,8 +366,6 @@ fn paragraph_gap(pages: &[&Page]) -> f32 {
             let gap = (a.base - b.base) / b.size.max(a.size);
             if (a.size - b.size).abs() <= 0.6
                 && a.bold == b.bold
-                && !a.tabular
-                && !b.tabular
                 && a.x1 >= right - 3.0 * a.size
                 && gap > 0.5
                 && gap < 3.2
@@ -493,118 +388,41 @@ fn blocks_for_page(p: &Page, para_gap: f32, vocab: &Vocab) -> Vec<Blk> {
     let mut out: Vec<Blk> = Vec::new();
     let mut prev: Option<&Line> = None;
     for l in lines {
-        let marker = list_marker(&l.text);
         let mut hard = false;
         let mut brk = true;
-        if let (Some(pl), Some(b)) = (prev, out.last()) {
-            let is_item = matches!(b.kind, Kind::Item(_));
+        if let Some(pl) = prev {
             let gap = pl.base - l.base;
             let style = (pl.size - l.size).abs() <= 0.6 && pl.bold == l.bold;
             let hyph = pl.text.ends_with('-');
             let short = !hyph && pl.x1 < right - 10.0 * pl.size;
-            let indent = !is_item && l.x0 - pl.x0 > 0.8 * l.size && !pl.tabular && !l.tabular;
-            brk = !style || gap > para_gap * l.size.max(pl.size) || marker.is_some() || indent || gap <= 0.0 || pl.col != l.col;
-            hard = pl.tabular || l.tabular || short;
+            let indent = l.x0 - pl.x0 > 0.8 * l.size;
+            brk = !style || gap > para_gap * l.size.max(pl.size) || indent || gap <= 0.0 || pl.col != l.col;
+            hard = short;
         }
-        let text_after = |m: Option<(Item, usize)>| match m {
-            Some((Item::Bullet, n)) => l.text[n..].to_string(),
-            _ => l.text.clone(),
-        };
         if brk {
-            let kind = match marker {
-                Some((it, _)) => Kind::Item(it),
-                None => Kind::Para,
-            };
-            out.push(Blk { kind, logical: vec![text_after(marker)], size: l.size, bold: l.bold, ends_open: false, tabular: l.tabular });
+            out.push(Blk { logical: vec![l.text.clone()], size: l.size, ends_open: false });
         } else {
             let b = out.last_mut().unwrap();
-            b.tabular |= l.tabular;
             if hard {
                 b.logical.push(l.text.clone());
             } else {
-                let last = b.logical.last_mut().unwrap();
-                join_wrapped(last, &l.text, vocab);
+                join_wrapped(b.logical.last_mut().unwrap(), &l.text, vocab);
             }
         }
         prev = Some(l);
     }
     for b in &mut out {
-        let t = b.logical.last().map(String::as_str).unwrap_or("");
-        b.ends_open = ends_open(t);
+        b.ends_open = ends_open(b.logical.last().map(String::as_str).unwrap_or(""));
     }
     out
 }
 
-fn looks_like_title(t: &str) -> bool {
-    let words: Vec<&str> = t.split_whitespace().collect();
-    let n = t.chars().count();
-    if words.is_empty() || words.len() > 8 || n > 60 || n < 3 || t.contains('\u{2003}') || t.contains('…') {
-        return false;
-    }
-    if t.ends_with(['.', ',', ';', ':', '?', '!']) || t.chars().last().is_some_and(|c| c.is_ascii_digit()) {
-        return false;
-    }
-    // a middle initial marks a person's name, not a section title
-    if words.iter().any(|w| w.len() == 2 && w.ends_with('.') && w.chars().next().is_some_and(|c| c.is_uppercase())) {
-        return false;
-    }
-    const SMALL: [&str; 14] = ["and", "of", "the", "for", "to", "in", "on", "a", "an", "or", "with", "by", "at", "from"];
-    let first_upper = t.chars().next().is_some_and(|c| c.is_uppercase());
-    first_upper && words.iter().all(|w| SMALL.contains(&w.to_lowercase().as_str()) || w.chars().next().is_some_and(|c| c.is_uppercase() || !c.is_alphabetic()))
-}
-
-/// A short title-case line standing alone above a real paragraph is a section
-/// title even in the body font. Pages that would get many (slides, contents
-/// pages) get none.
-fn promote_section_titles(bl: &mut Vec<Blk>, body: f32) {
-    // A title directly above its paragraph was joined into it as a short first line: split it off.
-    let mut i = 0;
-    let mut hits: Vec<usize> = Vec::new();
-    while i < bl.len() {
-        let styled = bl[i].kind == Kind::Para && bl[i].size >= 0.9 * body && bl[i].size < 1.2 * body;
-        if styled && bl[i].logical.len() >= 2 && looks_like_title(&bl[i].logical[0]) && bl[i].logical[1..].iter().map(|l| l.chars().count()).sum::<usize>() >= 80 {
-            let mut rest = bl[i].clone();
-            rest.logical.remove(0);
-            bl[i].logical.truncate(1);
-            bl.insert(i + 1, rest);
-        }
-        if styled && bl[i].logical.len() == 1 && looks_like_title(&bl[i].logical[0]) {
-            let next = bl.get(i + 1);
-            if next.is_some_and(|n| n.kind == Kind::Para && n.logical.iter().map(|l| l.chars().count()).sum::<usize>() >= 80) {
-                hits.push(i);
-            }
-        }
-        i += 1;
-    }
-    if hits.len() <= 6 {
-        for i in hits {
-            bl[i].kind = Kind::Heading;
-        }
-    }
-}
-
-fn classify_heading(b: &mut Blk, body: f32) -> bool {
-    if b.kind != Kind::Para && !(matches!(b.kind, Kind::Item(_)) && b.bold) {
-        return false;
-    }
+/// A short block in a type size well above the body text may be the document's title.
+fn title_candidate(b: &Blk) -> bool {
     let text = b.logical.join(" ");
     let chars = text.chars().count();
     let words = text.split_whitespace().count();
-    if text.contains('…') || b.logical.len() > 3 || chars == 0 || chars > 120 || words > 16 {
-        return false;
-    }
-    if text.ends_with('.') && words > 8 {
-        return false;
-    }
-    let big = b.size >= 1.2 * body;
-    let boldhead = b.bold && b.size >= 0.95 * body && chars <= 100 && words <= 12 && !text.ends_with(',');
-    if !(big || boldhead) {
-        return false;
-    }
-    if let Kind::Item(_) = b.kind {
-        // a bold "1. Introduction": keep the number in the heading
-    }
-    true
+    !(text.contains('…') || b.logical.len() > 3 || chars == 0 || chars > 120 || words > 16 || (text.ends_with('.') && words > 8))
 }
 
 /// Delimits a page marker while the text is assembled. Marker text must not go
@@ -662,45 +480,6 @@ fn url_segment(name: &str) -> String {
     out
 }
 
-fn leading_number(s: &str) -> Option<u32> {
-    let d: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    d.parse().ok()
-}
-
-/// Rendered parts in order. Consecutive list items are tight; across a page
-/// break a numbered list stays one list only if the numbers carry on.
-#[derive(Default)]
-struct Emit {
-    parts: Vec<(String, bool)>,
-    /// Last part was a list item: its number, if numbered.
-    prev_item: Option<Option<u32>>,
-}
-
-impl Emit {
-    fn block(&mut self, b: &Blk, lvl: usize, page_start: bool) {
-        let numbered = b.kind == Kind::Item(Item::Numbered);
-        let item = numbered || b.kind == Kind::Item(Item::Bullet);
-        let number = if numbered { leading_number(&b.logical[0]) } else { None };
-        let tight = item
-            && self.prev_item.is_some_and(|p| match (page_start, p, number) {
-                (false, ..) => true,
-                (true, Some(a), Some(n)) => n == a + 1,
-                (true, None, None) => true,
-                _ => false,
-            });
-        self.parts.push((render_block(b, lvl), tight));
-        self.prev_item = item.then_some(number);
-    }
-
-    fn paragraph(&mut self, s: String) {
-        self.parts.push((s, false));
-        self.prev_item = None;
-    }
-}
-
-/// Append `first` (the start of the next page) to the open block `c`, with the
-/// page marker at the join. A word hyphenated across the break is repaired and
-/// the marker goes after it.
 fn join_across(c: &mut Blk, first: &str, page: Option<usize>, vocab: &Vocab) {
     let last = c.logical.last_mut().unwrap();
     let Some(n) = page else {
@@ -724,10 +503,9 @@ fn join_across(c: &mut Blk, first: &str, page: Option<usize>, vocab: &Vocab) {
     }
 }
 
-/// Put the marker first in a paragraph or list item (after the number of a numbered one).
+/// Put the marker first in a paragraph.
 fn prefix_marker(b: &mut Blk, n: usize) {
-    let at = if b.kind == Kind::Item(Item::Numbered) { list_marker(&b.logical[0]).map_or(0, |m| m.1) } else { 0 };
-    b.logical[0].insert_str(at, &format!("{} ", mark(n)));
+    b.logical[0].insert_str(0, &format!("{} ", mark(n)));
 }
 
 const NOTE_LEAD_ALL: &str = "This text was read by machine from a scan and can contain errors.";
@@ -758,21 +536,12 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
     let body = mode_size(&all);
     let para_gap = paragraph_gap(&all);
 
-    // 2. blocks per page, headings classified
+    // 2. blocks per page
     let mut page_blocks: Vec<Vec<Blk>> = Vec::new();
     let mut is_ocr: Vec<bool> = Vec::new();
     for c in &contents {
         match c {
-            Content::Lines(p) => {
-                let mut bl = blocks_for_page(p, para_gap, &vocab);
-                for b in bl.iter_mut() {
-                    if classify_heading(b, body) {
-                        b.kind = Kind::Heading;
-                    }
-                }
-                promote_section_titles(&mut bl, body);
-                page_blocks.push(bl);
-            }
+            Content::Lines(p) => page_blocks.push(blocks_for_page(p, para_gap, &vocab)),
             Content::Ocr(t) => page_blocks.push(ocr_blocks(t, &vocab)),
         }
         is_ocr.push(matches!(c, Content::Ocr(_)));
@@ -782,7 +551,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
     let mut title: Option<String> = None;
     let mut drop_title: Option<(usize, usize)> = None;
     if let Some((pi, bl)) = page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty()) {
-        let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.kind == Kind::Heading && b.size >= 1.2 * body).collect();
+        let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.size >= 1.2 * body && title_candidate(b)).collect();
         cands.sort_by(|(ia, a), (ib, b)| b.size.partial_cmp(&a.size).unwrap().then(ia.cmp(ib)));
         for (bi, b) in cands {
             let t = b.logical.join(" ");
@@ -799,74 +568,54 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         title = meta_title.and_then(|t| meaningful_metadata_title(&t));
     }
 
-    // 4. heading levels by size rank (<= 3)
-    let key = |b: &Blk| -> i32 { if b.size >= 1.2 * body { b.size.round() as i32 } else { 0 } };
-    let mut keys: Vec<i32> = page_blocks.iter().flatten().filter(|b| b.kind == Kind::Heading).map(key).collect();
-    keys.sort_unstable_by(|a, b| b.cmp(a));
-    keys.dedup();
-    let level = |b: &Blk| -> usize { keys.iter().position(|k| *k == key(b)).unwrap_or(0).min(2) };
-
-    // 5. flatten with page markers; a paragraph or item left open at the end of
-    // a page continues into a lowercase paragraph at the top of the next
-        let mut e = Emit::default();
-    let mut carry: Option<(Blk, bool)> = None; // open block of the previous page, was it first on its page
+    // 4. flatten with page markers; a paragraph left open at the end of a page
+    // continues into a lowercase paragraph at the top of the next
+    let mut parts: Vec<String> = Vec::new();
+    let mut carry: Option<Blk> = None;
     for (pi, bl) in page_blocks.iter().enumerate() {
         let marker = (pi > 0).then_some(pi + 1);
         let blocks: Vec<&Blk> = bl.iter().enumerate().filter(|(bi, _)| drop_title != Some((pi, *bi))).map(|(_, b)| b).collect();
         if blocks.is_empty() {
-            if let Some((c, start)) = carry.take() {
-                e.block(&c, 0, start);
+            if let Some(c) = carry.take() {
+                parts.push(render_block(&c));
             }
             if let Some(n) = marker {
-                e.paragraph(mark(n));
+                parts.push(mark(n));
             }
             continue;
         }
         for (bi, b) in blocks.iter().enumerate() {
             let mut b = (*b).clone();
-            let mut page_start = bi == 0;
             if bi == 0 {
                 let mut marked = false;
-                if let Some((mut c, c_start)) = carry.take() {
-                    if b.kind == Kind::Para && !b.tabular && b.logical[0].chars().next().is_some_and(|ch| ch.is_lowercase()) {
+                if let Some(mut c) = carry.take() {
+                    if b.logical[0].chars().next().is_some_and(|ch| ch.is_lowercase()) {
                         let first = b.logical.remove(0);
                         join_across(&mut c, &first, marker, &vocab);
                         c.logical.append(&mut b.logical);
                         c.ends_open = b.ends_open;
                         b = c;
-                        page_start = c_start;
                         marked = true;
                     } else {
-                        e.block(&c, 0, c_start);
+                        parts.push(render_block(&c));
                     }
                 }
                 if let (Some(n), false) = (marker, marked) {
-                    if matches!(b.kind, Kind::Para | Kind::Item(_)) && !b.tabular {
-                        prefix_marker(&mut b, n);
-                    } else {
-                        e.paragraph(mark(n));
-                    }
+                    prefix_marker(&mut b, n);
                 }
             }
-            if bi + 1 == blocks.len() && matches!(b.kind, Kind::Para | Kind::Item(_)) && !b.tabular && b.ends_open {
-                carry = Some((b, page_start));
+            if bi + 1 == blocks.len() && b.ends_open {
+                carry = Some(b);
                 continue;
             }
-            let lvl = if b.kind == Kind::Heading { level(&b) } else { 0 };
-            e.block(&b, lvl, page_start);
+            parts.push(render_block(&b));
         }
     }
-    if let Some((c, start)) = carry.take() {
-        e.block(&c, 0, start);
+    if let Some(c) = carry.take() {
+        parts.push(render_block(&c));
     }
 
-    let mut md = String::new();
-    for (i, (s, tight)) in e.parts.iter().enumerate() {
-        if i > 0 {
-            md.push_str(if *tight { "\n" } else { "\n\n" });
-        }
-        md.push_str(s);
-    }
+    let mut md = parts.join("\n\n");
     let body_chars = strip_marks(&md).chars().filter(|c| !c.is_whitespace()).count();
 
     // 6. the note and the description. A blank page that went through OCR is
@@ -888,31 +637,10 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
     Rendered { markdown: expand_marks(&md, file_name), title, description, body_chars }
 }
 
-fn render_block(b: &Blk, lvl: usize) -> String {
-    match &b.kind {
-        Kind::Heading => {
-            let t = escape_line_start(&escape_inline(&b.logical.join(" ")));
-            format!("{} {}", "#".repeat(lvl + 2), t)
-        }
-        Kind::Item(Item::Bullet) => item_text("- ", b),
-        Kind::Item(Item::Numbered) => item_text("\u{0}", b),
-        Kind::Item(Item::Other) | Kind::Para => item_text("", b),
-    }
-}
-
-fn item_text(prefix: &str, b: &Blk) -> String {
-    let mut s = String::new();
-    for (i, l) in b.logical.iter().enumerate() {
-        if i > 0 {
-            s.push_str("  \n");
-            if prefix == "- " {
-                s.push_str("  ");
-            }
-        }
-        let e = escape_inline(l);
-        s.push_str(&if i == 0 && !prefix.is_empty() { e } else { escape_line_start(&e) });
-    }
-    format!("{}{s}", prefix.trim_matches('\u{0}'))
+/// Extracted text is literal: escape it so no part of it reads as markdown. The
+/// page markers are not yet in it (see `mark`), so they stay intact.
+fn render_block(b: &Blk) -> String {
+    b.logical.iter().map(|l| escape_line_start(&escape_inline(l))).collect::<Vec<_>>().join("  \n")
 }
 
 #[cfg(test)]
@@ -928,28 +656,14 @@ mod tests {
     }
 
     #[test]
-    fn open_item_continues_and_the_list_goes_on() {
-        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item continues with the", "next words here.\n3. Gamma item."]);
-        assert_eq!(note_free(&md), "Opening line.\n\n1. Alpha item.\n2. Beta item continues with the [p. 2](x.pdf#page=2) next words here.\n3. Gamma item.");
-    }
-
-    #[test]
-    fn numbered_list_resuming_on_a_page_is_tight_only_if_numbers_follow() {
-        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item.", "3. Gamma item.\n\nClosing line."]);
-        assert!(note_free(&md).contains("2. Beta item.\n3. [p. 2](x.pdf#page=2) Gamma item.\n\nClosing"), "{md}");
-        let md = ocr(&["Opening line.\n\n1. Alpha item.\n2. Beta item.", "1. Restarted item.\n\nClosing line."]);
-        assert!(note_free(&md).contains("2. Beta item.\n\n1. [p. 2](x.pdf#page=2) Restarted"), "{md}");
-    }
-
-    #[test]
-    fn ocr_widow_line_rejoins_its_item() {
-        let md = ocr(&["1. First item that runs on and on and\n\ncandidates.\n2. Second.\n\nNew paragraph."]);
-        assert_eq!(note_free(&md), "1. First item that runs on and on and candidates.\n2. Second.\n\nNew paragraph.");
+    fn ocr_widow_line_rejoins_its_paragraph() {
+        let md = ocr(&["First paragraph that runs on and on and\n\ncandidates.\n\nNew paragraph."]);
+        assert_eq!(note_free(&md), "First paragraph that runs on and on and candidates.\n\nNew paragraph.");
     }
 
     #[test]
     fn only_a_lowercase_paragraph_continues_an_open_block() {
-        for next in ["Upper start of a page.", "2019 was a year.", "- bullet.", "a. lettered.", "1. numbered."] {
+        for next in ["Upper start of a page.", "2019 was a year.", "- bullet.", "1. numbered."] {
             let md = ocr(&["A paragraph with no end", next]);
             assert!(note_free(&md).starts_with("A paragraph with no end\n\n"), "{next}: {md}");
         }
@@ -995,25 +709,74 @@ mod tests {
         assert_eq!(a, "the federal-level rules");
     }
 
-    #[test]
-    fn markers() {
-        assert_eq!(list_marker("1. Foo").map(|m| m.0), Some(Item::Numbered));
-        assert_eq!(list_marker("• Foo").map(|m| m.0), Some(Item::Bullet));
-        assert_eq!(list_marker("a. Foo").map(|m| m.0), Some(Item::Other));
-        assert!(list_marker("2019 was a year").is_none());
-        assert!(list_marker("J. Smith").is_none());
+    /// The HTML `md` renders to, asserted free of any markup element.
+    fn html_of(md: &str) -> String {
+        let mut h = String::new();
+        pulldown_cmark::html::push_html(&mut h, pulldown_cmark::Parser::new_ext(md, pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH));
+        for tag in ["<ul", "<ol", "<li", "<h1", "<h2", "<h3", "<blockquote", "<em", "<strong", "<a ", "<table", "<code", "<pre", "<hr", "<del", "<script", "<b>", "<div"] {
+            assert!(!h.contains(tag), "{tag} in {h} for {md}");
+        }
+        h
+    }
+
+    /// `text` as one escaped paragraph renders as exactly itself.
+    fn assert_literal(text: &str) {
+        let md = render_block(&Blk { logical: vec![text.to_string()], size: 0.0, ends_open: false });
+        let html = html_of(&md);
+        let plain = html.trim().strip_prefix("<p>").and_then(|h| h.strip_suffix("</p>")).expect(&html);
+        let plain = plain.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&");
+        assert_eq!(plain, text, "escaped as {md:?}");
     }
 
     #[test]
-    fn escapes() {
-        assert_eq!(escape_line_start(&escape_inline("# not heading")), "\\# not heading");
-        assert_eq!(escape_inline("see [[x]] and *this*"), "see \\[\\[x]] and \\*this\\*");
-        assert_eq!(escape_line_start("2019. Year"), "2019\\. Year");
+    fn text_that_looks_like_markdown_renders_literally() {
+        let leader = format!("{}M A L E {}", "- ".repeat(65), "- ".repeat(65));
+        for t in [
+            leader.trim_end(),
+            "- - - - M A L E - - - -",
+            "# Not a heading",
+            "> not a quote",
+            "1. not a list",
+            "7) not a list",
+            "*not* _emphasis_ and **strong**",
+            "a | b | c",
+            "see [here](http://x.test) and ![img](y.png) and [[wiki]]",
+            "<b>raw</b> <script>x</script> <!-- c -->",
+            "`code` and ``more``",
+            "snake_case_word stays",
+            "tilde ~~struck~~ text",
+            "R&D &amp; &#35; done",
+            "back\\slash \\* star",
+            "+ plus",
+            "~~~",
+            "---",
+            "===",
+            "    four spaces",
+        ] {
+            assert_literal(t.trim_start());
+        }
+    }
+
+    #[test]
+    fn leader_rule_is_escaped_not_nested() {
+        assert_eq!(note_free(&ocr(&["- - - - M A L E - - - -"])), "\\- - - - M A L E - - - -");
+        let md = ocr(&["Title line\n---"]);
+        assert_eq!(note_free(&md), "Title line ---");
+        let md = render_block(&Blk { logical: vec!["Title line".into(), "---".into(), "===".into()], size: 0.0, ends_open: false });
+        assert_eq!(md, "Title line  \n\\---  \n\\===");
+        html_of(&md);
+    }
+
+    #[test]
+    fn own_markup_is_not_escaped() {
+        let md = ocr(&["Plain *text* with no end", "continues here.\n\nNext one."]);
+        assert!(md.starts_with("> [!note]\n> This text was read by machine"), "{md}");
+        assert!(md.contains("Plain \\*text\\* with no end [p. 2](x.pdf#page=2) continues here.\n\nNext one."), "{md}");
     }
 
     #[test]
     fn double_spaced_text_stays_one_paragraph() {
-        let mk = |i: usize, w: &str| Line { x0: 72.0, x1: 540.0, base: 700.0 - 24.0 * i as f32, size: 12.0, bold: false, text: w.to_string(), tabular: false, col: 0 };
+        let mk = |i: usize, w: &str| Line { x0: 72.0, x1: 540.0, base: 700.0 - 24.0 * i as f32, size: 12.0, bold: false, text: w.to_string(), col: 0 };
         let mut lines: Vec<Line> = (0..6).map(|i| mk(i, "word word word word word word word word word word word word")).collect();
         lines.push(Line { x1: 300.0, ..mk(6, "last line of paragraph one.") });
         lines.extend((8..12).map(|i| mk(i, "second paragraph words words words words words words words")));
