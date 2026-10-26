@@ -1,5 +1,6 @@
 //! Turn positioned text lines into markdown. Pure functions, no pdfium here.
 
+use crate::front;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -30,6 +31,8 @@ struct Blk {
 pub struct Rendered {
     pub markdown: String,
     pub title: Option<String>,
+    /// The first full date on the first page, `YYYY-MM-DD`.
+    pub date: Option<String>,
     /// "<n> pages", plus ", scanned" / ", partly scanned" when OCR was used.
     pub description: String,
     /// Non-whitespace characters of the document text itself (no note, no page markers).
@@ -571,15 +574,21 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         is_ocr.push(matches!(c, Content::Ocr(_)));
     }
 
-    // 3. title from the first text page
-    let mut title: Option<String> = None;
+    // 3. title: the first page's subject line, else its largest type, else metadata, else the file name
+    let first_page: Vec<&[String]> = page_blocks
+        .iter()
+        .find(|b| !b.is_empty())
+        .map(|b| b.iter().map(|b| b.logical.as_slice()).collect())
+        .unwrap_or_default();
+    let date = front::first_date(&first_page);
+    let mut title: Option<String> = front::subject_title(&first_page);
     let mut drop_title: Option<(usize, usize)> = None;
-    if let Some((pi, bl)) = page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty()) {
+    if let (None, Some((pi, bl))) = (&title, page_blocks.iter().enumerate().find(|(i, b)| !is_ocr[*i] && !b.is_empty())) {
         let mut cands: Vec<(usize, &Blk)> = bl.iter().enumerate().filter(|(_, b)| b.size >= 1.2 * body && title_candidate(b)).collect();
         cands.sort_by(|(ia, a), (ib, b)| b.size.partial_cmp(&a.size).unwrap().then(ia.cmp(ib)));
         for (bi, b) in cands {
             let t = b.logical.join(" ");
-            if t.chars().count() <= 120 && !is_generic_title(&t) {
+            if t.chars().count() <= 120 && !is_generic_title(&t) && !front::is_letterhead(&t) {
                 title = Some(t);
                 if bi == 0 {
                     drop_title = Some((pi, bi));
@@ -661,7 +670,7 @@ pub fn render(contents: Vec<Content>, meta_title: Option<String>, file_name: &st
         };
         md = format!("> [!note]\n> {lead} {record}\n\n{md}");
     }
-    Rendered { markdown: expand_marks(&md, file_name), title, description, body_chars }
+    Rendered { markdown: expand_marks(&md, file_name), title, date, description, body_chars }
 }
 
 /// Extracted text is literal: escape it so no part of it reads as markdown. The
@@ -837,5 +846,26 @@ mod tests {
         assert_eq!(r(Some("Real Metadata Title")).as_deref(), Some("Real Metadata Title"));
         assert_eq!(r(Some("TeamMate Report")).as_deref(), Some("521 BERS 2020 SHPRA"));
         assert_eq!(r(None).as_deref(), Some("521 BERS 2020 SHPRA"));
+    }
+
+    #[test]
+    fn a_letters_subject_line_is_its_title_and_its_date_is_a_fact() {
+        let letter = "BY EMAIL\n\nJune 9, 2020\n\nDear Chair:\n\nAudit Status: Evaluation of Sexual Harassment Prevention and Response Practices for Audit Period January 1, 2018 to December 31, 2019. Determination: PRELIMINARY\n\nBody of the letter goes on here.";
+        let r = render(vec![Content::Ocr(letter.into())], Some("Real Metadata Title".into()), "521_BERS_2020_SHPRA.pdf");
+        assert_eq!(r.title.as_deref(), Some("Evaluation of Sexual Harassment Prevention and Response Practices"));
+        assert_eq!(r.date.as_deref(), Some("2020-06-09"));
+        let none = render(vec![Content::Ocr("Some scanned words here for the page.".into())], None, "x.pdf");
+        assert_eq!(none.date, None);
+    }
+
+    #[test]
+    fn letterhead_is_not_a_title_in_large_type() {
+        let line = |base: f32, size: f32, text: &str| Line { x0: 72.0, x1: 300.0, base, size, bold: false, text: text.into(), col: 0 };
+        let mut lines = vec![line(740.0, 24.0, "BY EMAIL"), line(700.0, 20.0, "Annual Hiring Review")];
+        for i in 0..12 {
+            lines.push(line(600.0 - 14.0 * i as f32, 10.0, "Ordinary body text that runs along the line."));
+        }
+        let r = render(vec![Content::Lines(Page { height: 792.0, lines })], None, "x.pdf");
+        assert_eq!(r.title.as_deref(), Some("Annual Hiring Review"));
     }
 }

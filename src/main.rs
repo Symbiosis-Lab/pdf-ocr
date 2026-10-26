@@ -1,4 +1,5 @@
 mod extract;
+mod front;
 mod layout;
 mod ocr;
 
@@ -116,7 +117,8 @@ fn main() {
         Some(t) => js(t),
         None => "null".into(),
     };
-    let line = format!("{{\"kind\":\"derived\",\"fragments\":{{\"text\":{}}},\"facts\":{{\"title\":{},\"description\":{}}}}}\n", js(&r.markdown), title, js(&r.description));
+    let date = r.date.as_ref().map(|d| format!(",\"date\":{}", js(d))).unwrap_or_default();
+    let line = format!("{{\"kind\":\"derived\",\"fragments\":{{\"text\":{}}},\"facts\":{{\"title\":{},\"description\":{}{}}}}}\n", js(&r.markdown), title, js(&r.description), date);
     let mut so = std::io::stdout().lock();
     so.write_all(line.as_bytes()).unwrap_or_else(|_| fail("could not write stdout"));
 }
