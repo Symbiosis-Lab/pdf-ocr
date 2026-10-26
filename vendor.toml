@@ -3,3 +3,13 @@
 release = "chromium/8086"
 url = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/8086/pdfium-mac-arm64.tgz"
 sha256 = "e98679e052c07edbb5a627980902abb823d4b3f35744d877bd21668bd9fc13ab"
+
+# Inputs to the OCR fingerprint. package-macos.py refuses any other tesseract and
+# ships this traineddata (tessdata_fast 4.1.0, byte-identical to Homebrew's) instead
+# of Homebrew's, so a build on any machine keeps the same cached readings.
+[tesseract]
+version = "5.5.3"
+
+[eng-traineddata]
+url = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/65727574dfcd264acbb0c3e07860e4e9e9b22185/eng.traineddata"
+sha256 = "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"

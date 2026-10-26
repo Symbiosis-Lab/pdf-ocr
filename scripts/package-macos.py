@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Package the release for macOS: pdf-ocr, libpdfium, and a relocated Tesseract
 with its libraries and English language data, as one tar.gz a moss plugin can
-download. Needs Homebrew's tesseract (its build and data are what is shipped)
-and a release build (scripts/build.sh).
+download. Needs Homebrew's tesseract at the version pinned in vendor.toml (its binary is
+shipped; the English data is downloaded from the pinned URL and checked against
+its sha256) and a release build (scripts/build.sh). PDF_OCR_ALLOW_TESSERACT_MISMATCH=1
+lets a local run use another tesseract; never for a release.
 
     python3 -I scripts/package-macos.py            # writes dist/pdf-ocr-<version>-darwin-arm64.tar.gz
 
@@ -11,7 +13,7 @@ copied beside it and its load commands rewritten to @executable_path/@loader_pat
 then everything is re-signed ad hoc (rewriting a Mach-O invalidates its signature).
 Archives carry no symlinks, because moss refuses them when it unpacks a stack.
 """
-import hashlib, os, pathlib, platform, re, shutil, subprocess, sys, tarfile
+import hashlib, os, pathlib, platform, re, shutil, subprocess, sys, tarfile, tomllib, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BREW = pathlib.Path('/opt/homebrew')
@@ -25,6 +27,23 @@ def deps(f):
 def local(d):
     return d.startswith(str(BREW)) or d.startswith('@rpath/')
 
+def pinned_traineddata(pin):
+    data = urllib.request.urlopen(pin['url']).read()
+    got = hashlib.sha256(data).hexdigest()
+    if got != pin['sha256']:
+        sys.exit(f"eng.traineddata from {pin['url']} has sha256 {got}, pinned {pin['sha256']}")
+    return data
+
+def check_tesseract(tess, want):
+    got = run(str(tess), '--version').splitlines()[0]
+    if got == f'tesseract {want}':
+        return
+    msg = f"tesseract is '{got}' but vendor.toml pins {want}: run 'brew upgrade tesseract' (or change the pin and expect every cached reading to be redone)"
+    if os.environ.get('PDF_OCR_ALLOW_TESSERACT_MISMATCH') == '1':
+        print(f'warning: {msg}', file=sys.stderr)
+    else:
+        sys.exit(msg)
+
 def main():
     if platform.machine() != 'arm64':
         sys.exit('build on Apple silicon: the bundle is darwin-arm64')
@@ -33,6 +52,9 @@ def main():
     if not exe.is_file() or not (ROOT / 'target/release/libpdfium.dylib').is_file():
         sys.exit('run scripts/build.sh first')
     tess = pathlib.Path(os.path.realpath(BREW / 'bin/tesseract'))
+    pins = tomllib.loads((ROOT / 'vendor.toml').read_text())
+    check_tesseract(tess, pins['tesseract']['version'])
+    traineddata = pinned_traineddata(pins['eng-traineddata'])
 
     out = ROOT / 'dist' / f'pdf-ocr-{version}-darwin-arm64'
     shutil.rmtree(out, ignore_errors=True)
@@ -42,7 +64,7 @@ def main():
     shutil.copy(exe, out / 'pdf-ocr')
     shutil.copy(ROOT / 'target/release/libpdfium.dylib', out / 'libpdfium.dylib')
     shutil.copy(tess, out / 'tesseract')
-    shutil.copy(os.path.realpath(BREW / 'share/tessdata/eng.traineddata'), out / 'tessdata/eng.traineddata')
+    (out / 'tessdata/eng.traineddata').write_bytes(traineddata)
 
     # every Homebrew library reachable from tesseract, keyed by the name it is loaded as
     libdirs = {pathlib.Path(os.path.realpath(p)) for p in BREW.glob('opt/*/lib')}
